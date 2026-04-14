@@ -1,0 +1,76 @@
+{
+  "joy": [
+    "I am so happy to see you!",
+    "This is the best day of my life.",
+    "I love you more than anything.",
+    "We finally did it, this is wonderful.",
+    "Thank you so much, this means everything.",
+    "Everything is going to be okay, I promise.",
+    "It will all work out in the end.",
+    "Things are looking up, I can feel it.",
+    "Oh come on, it is going to be fine!",
+    "That is so great, I cannot believe it."
+  ],
+  "sadness": [
+    "I never thought it would end like this.",
+    "I miss you every single day.",
+    "Everything feels so empty without you.",
+    "I just feel so lost right now.",
+    "It hurts more than I can say.",
+    "I do not know how to go on without you.",
+    "Nothing feels the same anymore.",
+    "I wish things could have been different."
+  ],
+  "anger": [
+    "I hate this, I hate all of it.",
+    "How could you do this to me?",
+    "I am done with you, do you hear me?",
+    "This is absolutely unacceptable.",
+    "Stop lying to my face right now.",
+    "Come on, be nice about it.",
+    "What is wrong with you?",
+    "I cannot believe you would say that."
+  ],
+  "surprise": [
+    "I cannot believe what I am hearing.",
+    "Wait, are you serious right now?",
+    "What? That makes no sense at all.",
+    "I had no idea this was even possible.",
+    "You actually did it, I am stunned.",
+    "Wait, does he really do that?",
+    "Are you serious? No way!",
+    "I never saw that coming."
+  ],
+  "excitement": [
+    "I cannot wait, this is going to be amazing.",
+    "Finally, we can move on and start fresh.",
+    "This is incredible, better than I imagined.",
+    "Let us go, I have been waiting for this.",
+    "Yes, yes, yes, this is perfect!",
+    "I have been dreaming about this moment.",
+    "This is the most exciting thing ever.",
+    "We are actually doing this!"
+  ],
+  "shame": [
+    "I am so embarrassed, I do not know what to say.",
+    "This is entirely my fault, I am sorry.",
+    "I should have known better, forgive me.",
+    "I let everyone down and I know it.",
+    "Please do not look at me like that.",
+    "I cannot believe I did something so stupid.",
+    "I am so ashamed of myself.",
+    "I wish I could take it all back."
+  ],
+  "neutral": [
+    "Okay, let me think about this.",
+    "I see what you mean.",
+    "That sounds reasonable enough.",
+    "Alright, what do you want to do next.",
+    "Sure, I will take care of it.",
+    "There is nothing to tell, he is just a coworker.",
+    "Come on, it is not a big deal.",
+    "So what do you think about that?",
+    "I am just saying it is worth considering.",
+    "Let us just see what happens."
+  ]
+}
