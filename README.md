@@ -6,6 +6,6 @@
 
 | 이름 | 역할 | GitHub |
 |------|------|------------------|
-| 장혜미 | 팀장 · 개발자 |https://github.com/jang-hyemi |
-| 윤설희 | 개발자 | https://github.com/tjfgml12/tjfgml/tree/main |
-| 비다 | 개발자 | https://github.com/vida2398/-.git |
+| 장혜미 | 팀장 · 개발자 |https://jang-hyemi.github.io/ |
+| 윤설희 | 개발자 | https://github.com/tjfgml12 |
+| 비다 | 개발자 | https://vida2398.github.io/ |
