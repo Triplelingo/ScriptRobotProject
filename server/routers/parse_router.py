@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-import pymysql
 import re
 import json
 from transformers import pipeline
@@ -8,16 +7,6 @@ from transformers import pipeline
 router = APIRouter()
 
 emotion_classifier = None
-
-def get_db():
-    return pymysql.connect(
-        host        = "localhost",
-        user        = "root",
-        password    = "dongyang",  # 실제 비밀번호로 교체
-        database    =  "emo",
-        charset     = "utf8mb4",
-        cursorclass = pymysql.cursors.Cursor
-    )
 
 def load_anchors():
     global emotion_classifier
