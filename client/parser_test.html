@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Script Parser — 대본 인물 분리기</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+--bg: #f8f7f4; --surface: #ffffff; --surface2: #f2f1ee;
+--border: rgba(0,0,0,0.10); --border2: rgba(0,0,0,0.18);
+--text: #1a1a18; --text2: #5a5a56; --text3: #9a9a94;
+--accent: #4a46c8; --accent-bg: #eeedfe; --accent-text: #3c3489;
+--success: #0f6e56; --success-bg: #e1f5ee;
+--warning: #854f0b; --warning-bg: #faeeda;
+--radius: 12px; --radius-sm: 8px;
+--e-joy-bg:#FAEEDA; --e-joy-t:#633806;
+--e-sadness-bg:#E6F1FB; --e-sadness-t:#0C447C;
+--e-anger-bg:#FAECE7; --e-anger-t:#712B13;
+--e-surprise-bg:#EEEDFE; --e-surprise-t:#3C3489;
+--e-excitement-bg:#EAF3DE; --e-excitement-t:#27500A;
+--e-shame-bg:#FBEAF0; --e-shame-t:#72243E;
+--e-neutral-bg:#F1EFE8; --e-neutral-t:#444441;
+}
+@media (prefers-color-scheme: dark) {
+:root {
+--bg: #1c1c1a; --surface: #262624; --surface2: #2e2e2c;
+--border: rgba(255,255,255,0.10); --border2: rgba(255,255,255,0.18);
+--text: #e8e6de; --text2: #a8a69e; --text3: #68665e;
+--accent: #8f8bf0; --accent-bg: #26215c; --accent-text: #cecbf6;
+}
+}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.6; min-height: 100vh; }
+.app { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+.header { margin-bottom: 32px; }
+.header h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+.header p { font-size: 14px; color: var(--text2); }
+.input-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 24px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.tab { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; }
+.tab.active { background: var(--accent-bg); color: var(--accent-text); border-color: transparent; }
+textarea { width: 100%; height: 180px; resize: vertical; border: 1px solid var(--border2); border-radius: var(--radius-sm); background: var(--surface2); color: var(--text); font-family: monospace; font-size: 13px; line-height: 1.6; padding: 12px; outline: none; }
+textarea:focus { border-color: var(--accent); }
+.options-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.select-wrap { position: relative; }
+.select-wrap select { appearance: none; padding: 6px 28px 6px 10px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface2); color: var(--text); font-size: 13px; cursor: pointer; outline: none; }
+.select-wrap::after { content: "▾"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 11px; color: var(--text2); }
+label.opt { font-size: 13px; color: var(--text2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.btn-parse { margin-left: auto; padding: 8px 22px; border-radius: 20px; background: var(--accent); color: #fff; border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity .15s; }
+.btn-parse:hover { opacity: .88; }
+.btn-parse:disabled { opacity: .45; cursor: not-allowed; }
+#result-section { display: none; }
+.result-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.meta-chip { font-size: 12px; padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--text2); }
+.meta-chip strong { color: var(--text); font-weight: 500; }
+.char-filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+.char-pill { padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; border: 2px solid transparent; cursor: pointer; background: var(--surface); border-color: var(--border2); color: var(--text2); }
+.char-pill.active { border-color: transparent; }
+.emo-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; }
+.emo-pill { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1.5px solid transparent; cursor: pointer; opacity: .55; transition: all .15s; }
+.emo-pill.active { opacity: 1; border-color: currentColor; }
+.emo-pill.joy { background:var(--e-joy-bg); color:var(--e-joy-t); }
+.emo-pill.sadness { background:var(--e-sadness-bg); color:var(--e-sadness-t); }
+.emo-pill.anger { background:var(--e-anger-bg); color:var(--e-anger-t); }
+.emo-pill.surprise { background:var(--e-surprise-bg); color:var(--e-surprise-t); }
+.emo-pill.excitement { background:var(--e-excitement-bg); color:var(--e-excitement-t); }
+.emo-pill.shame { background:var(--e-shame-bg); color:var(--e-shame-t); }
+.emo-pill.neutral { background:var(--e-neutral-bg); color:var(--e-neutral-t); }
+.dialogue-list { display: flex; flex-direction: column; gap: 10px; }
+.dlg-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: var(--radius-sm); padding: 14px 16px; display: flex; gap: 14px; align-items: flex-start; }
+.dlg-card.joy { border-left-color: var(--e-joy-t); }
+.dlg-card.sadness { border-left-color: var(--e-sadness-t); }
+.dlg-card.anger { border-left-color: var(--e-anger-t); }
+.dlg-card.surprise { border-left-color: var(--e-surprise-t); }
+.dlg-card.excitement { border-left-color: var(--e-excitement-t); }
+.dlg-card.shame { border-left-color: var(--e-shame-t); }
+.dlg-card.neutral { border-left-color: var(--e-neutral-t); }
+.dlg-card.hidden { display: none; }
+.dlg-index { font-size: 11px; color: var(--text3); min-width: 28px; padding-top: 2px; }
+.dlg-name { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 20px; white-space: nowrap; min-width: 80px; text-align: center; flex-shrink: 0; }
+.dlg-body { flex: 1; }
+.dlg-line { font-size: 14px; color: var(--text); line-height: 1.6; margin-bottom: 6px; }
+.dlg-bottom { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.emo-badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+.emo-badge.joy { background:var(--e-joy-bg); color:var(--e-joy-t); }
+.emo-badge.sadness { background:var(--e-sadness-bg); color:var(--e-sadness-t); }
+.emo-badge.anger { background:var(--e-anger-bg); color:var(--e-anger-t); }
+.emo-badge.surprise { background:var(--e-surprise-bg); color:var(--e-surprise-t); }
+.emo-badge.excitement { background:var(--e-excitement-bg); color:var(--e-excitement-t); }
+.emo-badge.shame { background:var(--e-shame-bg); color:var(--e-shame-t); }
+.emo-badge.neutral { background:var(--e-neutral-bg); color:var(--e-neutral-t); }
+.conf-wrap { display: flex; align-items: center; gap: 6px; }
+.conf-bar { width: 60px; height: 3px; border-radius: 2px; background: var(--border2); overflow: hidden; }
+.conf-fill { height: 100%; border-radius: 2px; }
+.conf-label { font-size: 11px; color: var(--text3); }
+.motion-tag { font-size: 11px; color: var(--text3); font-family: monospace; }
+.dlg-stage { font-size: 12px; color: var(--text3); font-style: italic; margin-top: 3px; }
+.btn-flag { margin-left: auto; font-size: 11px; padding: 2px 10px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); color: var(--text2); cursor: pointer; }
+.btn-flag.active { background: var(--warning-bg); color: var(--warning); border-color: transparent; }
+.empty { text-align: center; padding: 48px 0; color: var(--text3); font-size: 14px; }
+.loading { text-align: center; padding: 48px 0; color: var(--text2); font-size: 14px; }
+
+.drop-zone {
+  border: 2px dashed var(--border2); border-radius: var(--radius-sm);
+  padding: 40px 20px; text-align: center; cursor: pointer;
+  transition: background .15s; color: var(--text2); font-size: 14px;
+}
+.drop-zone:hover, .drop-zone.dragover { background: var(--surface2); }
+.drop-zone input { display: none; }
+.drop-icon { font-size: 28px; margin-bottom: 8px; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+
+</style>
+</head>
+<body>
+<div class="app">
+<div class="header">
+  <h1>대본 인물 분리기</h1>
+  <p>텍스트를 붙여넣으면 인물별로 대사와 감정을 분석합니다.</p>
+</div>
+
+<div class="input-panel">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('paste')">텍스트 붙여넣기</button>
+    <button class="tab" onclick="switchTab('file')">파일 업로드</button>
+  </div>
+
+  <div id="tab-paste" class="tab-content active">
+    <textarea id="text-input" placeholder="여기에 대본을 붙여넣으세요."></textarea>
+  </div>
+
+  <div id="tab-file" class="tab-content">
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".txt" onchange="handleFile(this)">
+      <div class="drop-icon">📄</div>
+      <div>.txt 파일을 끌어다 놓거나 클릭해서 선택하세요</div>
+      <div style="font-size:12px; margin-top:4px; opacity:.6">최대 5MB</div>
+    </div>
+  </div>
+
+  <div class="options-row">
+    <div class="select-wrap">
+      <select id="format-select">
+        <option value="auto">형식 자동 감지</option>
+        <option value="screenplay">Screenplay 스타일</option>
+        <option value="inline_colon">NAME: 스타일</option>
+      </select>
+    </div>
+    <label class="opt">
+      <input type="checkbox" id="strip-stage" checked> 무대지시문 숨기기
+    </label>
+    <button class="btn-parse" id="parse-btn" onclick="runParse()">분석하기</button>
+  </div>
+</div>
+
+<div id="result-section">
+  <div class="result-meta" id="result-meta"></div>
+  <div class="char-filter" id="char-filter"></div>
+  <div class="emo-filter" id="emo-filter"></div>
+  <div class="dialogue-list" id="dialogue-list"></div>
+</div>
+</div>
+
+<script>
+// ── 탭 전환 ──
+function switchTab(id) {
+  document.querySelectorAll('.tab').forEach((t, i) =>
+    t.classList.toggle('active', ['paste','file'][i] === id)
+  );
+  document.querySelectorAll('.tab-content').forEach(c =>
+    c.classList.remove('active')
+  );
+  document.getElementById('tab-' + id).classList.add('active');
+}
+
+// ── 파일 업로드 ──
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+function handleFile(input) { if (input.files[0]) readFile(input.files[0]); }
+function readFile(file) {
+  if (file.size > 5 * 1024 * 1024) { alert('5MB 이하 파일만 업로드 가능합니다.'); return; }
+  const r = new FileReader();
+  r.onload = e => {
+    document.getElementById('text-input').value = e.target.result;
+    switchTab('paste');  // 파일 로드 후 텍스트 탭으로 자동 전환
+  };
+  r.readAsText(file, 'utf-8');
+}
+
+const MOTION_LABEL = {
+  joy:"상하 고갯짓", sadness:"하향 고정", anger:"좌우 고갯짓",
+  surprise:"대각선 위 고정", excitement:"양어깨 반복", shame:"대각선 아래 고정", neutral:"미세 진동"
+};
+const EMOTIONS = ["joy","sadness","anger","surprise","excitement","shame","neutral"];
+const PALETTES = [
+  ["#eeedfe","#3c3489"],["#e1f5ee","#085041"],["#faece7","#712b13"],
+  ["#faeeda","#633806"],["#e6f1fb","#0c447c"],["#fbeaf0","#72243e"],["#eaf3de","#27500a"]
+];
+const charColor = {}; let colorIdx = 0;
+function getColor(name) {
+  if (!charColor[name]) charColor[name] = PALETTES[colorIdx++ % PALETTES.length];
+  return charColor[name];
+}
+
+let currentData = null;
+let activeChar = '__all__';
+let activeEmo  = '__all__';
+
+// ── fetch로 교체된 runParse ──
+async function runParse() {
+  const text = document.getElementById('text-input').value.trim();
+  if (!text) { alert('텍스트를 입력해주세요.'); return; }
+
+  // 로딩 상태
+  const btn = document.getElementById('parse-btn');
+  btn.disabled = true;
+  btn.textContent = '분석 중...';
+  document.getElementById('result-section').style.display = 'block';
+  document.getElementById('dialogue-list').innerHTML = '<div class="loading">감정 분석 중입니다...</div>';
+
+  try {
+    const res = await fetch('http://127.0.0.1:8000/api/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text:   text,
+        format: document.getElementById('format-select').value
+      })
+    });
+
+    if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
+    currentData = await res.json();
+    renderResult(currentData);
+
+  } catch (err) {
+    document.getElementById('dialogue-list').innerHTML =
+      `<div class="empty">오류: ${err.message}<br>서버가 실행 중인지 확인해주세요.</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '분석하기';
+  }
+}
+
+function renderResult(data) {
+  renderMeta(data.metadata || data);
+  renderCharFilter(data.dialogue);
+  renderEmoFilter(data.dialogue);
+  renderDialogue(data.dialogue);
+  activeChar = '__all__';
+  activeEmo  = '__all__';
+}
+
+function renderMeta(meta) {
+  const chars = [...new Set(currentData.dialogue.map(d => d.character))];
+  document.getElementById('result-meta').innerHTML =
+    `<span class="meta-chip">형식 <strong>${meta.format_detected}</strong></span>` +
+    `<span class="meta-chip">총 대사 <strong>${meta.total_lines}줄</strong></span>` +
+    `<span class="meta-chip">등장인물 <strong>${chars.length}명</strong></span>`;
+}
+
+function renderCharFilter(dialogue) {
+  const counts = {};
+  dialogue.forEach(d => counts[d.character] = (counts[d.character]||0)+1);
+  const chars = [...new Set(dialogue.map(d => d.character))];
+  document.getElementById('char-filter').innerHTML =
+    `<button class="char-pill active" data-char="__all__" onclick="filterChar('__all__')">전체 ${dialogue.length}</button>` +
+    chars.map(c => {
+      const [bg, tc] = getColor(c);
+      return `<button class="char-pill" data-char="${c}"
+        style="background:${bg};color:${tc};border-color:transparent"
+        onclick="filterChar('${c}')">${c} ${counts[c]}</button>`;
+    }).join('');
+}
+
+function renderEmoFilter(dialogue) {
+  const counts = {};
+  dialogue.forEach(d => counts[d.emotion] = (counts[d.emotion]||0)+1);
+  document.getElementById('emo-filter').innerHTML =
+    `<button class="emo-pill active" style="background:var(--surface2);color:var(--text2)" data-emo="__all__" onclick="filterEmo('__all__')">전체</button>` +
+    EMOTIONS.filter(e => counts[e] > 0).map(e =>
+      `<button class="emo-pill ${e}" data-emo="${e}" onclick="filterEmo('${e}')">${e} ${counts[e]}</button>`
+    ).join('');
+}
+
+function filterChar(char) {
+  activeChar = char;
+  document.querySelectorAll('.char-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.char === char);
+  });
+  applyFilter();
+}
+
+function filterEmo(emo) {
+  activeEmo = emo;
+  document.querySelectorAll('.emo-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.emo === emo);
+  });
+  applyFilter();
+}
+
+function applyFilter() {
+  document.querySelectorAll('.dlg-card').forEach(card => {
+    const charOk = activeChar === '__all__' || card.dataset.char === activeChar;
+    const emoOk  = activeEmo  === '__all__' || card.dataset.emo  === activeEmo;
+    card.classList.toggle('hidden', !charOk || !emoOk);
+  });
+}
+
+function renderDialogue(dialogue) {
+  const strip = document.getElementById('strip-stage').checked;
+  if (!dialogue.length) {
+    document.getElementById('dialogue-list').innerHTML = '<div class="empty">인물 대사를 찾지 못했어요.</div>';
+    return;
+  }
+  document.getElementById('dialogue-list').innerHTML = dialogue.map(d => {
+    const [bg, tc] = getColor(d.character);
+    const conf     = Math.round((d.confidence || 0) * 100);
+    const stageHtml = (!strip && d.stage_dir)
+      ? `<div class="dlg-stage">(${d.stage_dir})</div>` : '';
+    return `
+      <div class="dlg-card ${d.emotion}" data-char="${d.character}" data-emo="${d.emotion}">
+        <div class="dlg-index">#${d.index}</div>
+        <div class="dlg-name" style="background:${bg};color:${tc}">${d.character}</div>
+        <div class="dlg-body">
+          <div class="dlg-line">${esc(d.line)}</div>
+          ${stageHtml}
+          <div class="dlg-bottom">
+            <span class="emo-badge ${d.emotion}">${d.emotion}</span>
+            <div class="conf-wrap">
+              <div class="conf-bar">
+                <div class="conf-fill" style="width:${conf}%;background:${tc}"></div>
+              </div>
+              <span class="conf-label">${conf}%</span>
+            </div>
+            <span class="motion-tag">${MOTION_LABEL[d.emotion] || ''}</span>
+            <button class="btn-flag" onclick="this.classList.toggle('active')">⚑ 수정 필요</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// 샘플 대본 미리 로드
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('text-input').value =
+`INT. COFFEE SHOP - DAY
+
+SARAH
+I never thought it would end like this.
+
+JAMES
+(quietly)
+It is going to be okay, I promise.
+
+SARAH
+I hate this situation. I hate all of it.
+
+JAMES
+What? Are you serious right now?
+
+SARAH
+I am so sorry. It is my fault entirely.
+
+JAMES
+Finally, we can move on! This is amazing.`;
+});
+</script>
+</body>
+</html>
