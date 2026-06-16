@@ -19,6 +19,7 @@ Triplelingo/
 ---
 
 ## 기술 스택
+![Architecture](docs/architecture.svg)
 
 | 구분 | 기술 |
 |------|------|

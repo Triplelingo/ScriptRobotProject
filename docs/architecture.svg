@@ -1,0 +1,92 @@
+<svg width="680" viewBox="0 0 680 520" xmlns="http://www.w3.org/2000/svg" style="background:#ffffff;font-family:Arial,sans-serif">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- ── CLIENT (teal) ── -->
+<rect x="30" y="30" width="175" height="460" rx="14" fill="#FAF7F2" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="56" text-anchor="middle" font-size="14" font-weight="500" fill="#3D3528">Client</text>
+<text x="117" y="73" text-anchor="middle" font-size="12" fill="#7A6E5A">React · Vite</text>
+
+<rect x="48" y="90" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="113" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">UploadPage</text>
+<rect x="48" y="136" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="159" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">PreviewPage</text>
+<rect x="48" y="182" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="205" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">CharacterPage</text>
+<rect x="48" y="228" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="251" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">PracticePage</text>
+<rect x="48" y="274" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="117" y="297" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">HistoryPage</text>
+
+<rect x="48" y="330" width="139" height="60" rx="6" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text x="117" y="352" text-anchor="middle" font-size="12" fill="#444441">윤설희</text>
+<text x="117" y="368" text-anchor="middle" font-size="12" fill="#5F5E5A">BERT 감정 분류</text>
+<text x="117" y="384" text-anchor="middle" font-size="12" fill="#5F5E5A">대본 파싱 · DB</text>
+
+<rect x="48" y="404" width="139" height="60" rx="6" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text x="117" y="426" text-anchor="middle" font-size="12" fill="#444441">비다</text>
+<text x="117" y="442" text-anchor="middle" font-size="12" fill="#5F5E5A">Azure TTS · STT</text>
+<text x="117" y="458" text-anchor="middle" font-size="12" fill="#5F5E5A">발음 평가</text>
+
+<!-- ── 화살표 REST ── -->
+<line x1="205" y1="200" x2="247" y2="200" stroke="#888780" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="226" y="193" text-anchor="middle" font-size="11" fill="#5F5E5A">REST</text>
+<line x1="247" y1="220" x2="205" y2="220" stroke="#888780" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="226" y="235" text-anchor="middle" font-size="11" fill="#5F5E5A">JSON</text>
+
+<!-- ── SERVER (purple) ── -->
+<rect x="251" y="30" width="178" height="460" rx="14" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="56" text-anchor="middle" font-size="14" font-weight="500" fill="#2C2C2A">Server</text>
+<text x="340" y="73" text-anchor="middle" font-size="12" fill="#5F5E5A">FastAPI :8000</text>
+
+<rect x="269" y="90" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="113" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">Auth · User</text>
+<rect x="269" y="136" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="159" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">Script · Lines</text>
+<rect x="269" y="182" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="205" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">Azure TTS (SSML)</text>
+<rect x="269" y="228" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="251" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">Pronunciation Eval</text>
+<rect x="269" y="274" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="297" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">Session History</text>
+<rect x="269" y="320" width="142" height="36" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="343" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">WebSocket /ws/robot</text>
+<rect x="269" y="374" width="142" height="50" rx="6" fill="#D3D1C7" stroke="#888780" stroke-width="0.5"/>
+<text x="340" y="396" text-anchor="middle" font-size="12" fill="#2C2C2A" dominant-baseline="central">MySQL</text>
+<text x="340" y="414" text-anchor="middle" font-size="12" fill="#444441" dominant-baseline="central">schema: emo</text>
+
+<!-- ── 화살표 WebSocket ── -->
+<line x1="429" y1="200" x2="471" y2="200" stroke="#888780" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="450" y="193" text-anchor="middle" font-size="11" fill="#5F5E5A">WS</text>
+<line x1="471" y1="220" x2="429" y2="220" stroke="#888780" stroke-width="1.2" marker-end="url(#arrow)"/>
+<text x="450" y="235" text-anchor="middle" font-size="11" fill="#5F5E5A">audio+emotion</text>
+
+<!-- ── HARDWARE (coral) ── -->
+<rect x="475" y="30" width="175" height="460" rx="14" fill="#FAF7F2" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="56" text-anchor="middle" font-size="14" font-weight="500" fill="#3D3528">Hardware</text>
+<text x="562" y="73" text-anchor="middle" font-size="12" fill="#7A6E5A">Raspberry Pi 5</text>
+
+<rect x="493" y="90" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="113" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">ws_client.py</text>
+<rect x="493" y="136" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="159" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">servo_controller.py</text>
+<rect x="493" y="182" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="205" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">MAX98357A I2S</text>
+<rect x="493" y="228" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="251" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">PCA9685 + MG996R×3</text>
+<rect x="493" y="274" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="297" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">TFT LCD (SPI)</text>
+<rect x="493" y="320" width="139" height="36" rx="6" fill="#EDE8DF" stroke="#B4A98A" stroke-width="0.5"/>
+<text x="562" y="343" text-anchor="middle" font-size="12" fill="#3D3528" dominant-baseline="central">USB 마이크</text>
+
+<rect x="493" y="374" width="139" height="50" rx="6" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text x="562" y="396" text-anchor="middle" font-size="12" fill="#444441">장혜미 (팀장)</text>
+<text x="562" y="414" text-anchor="middle" font-size="12" fill="#5F5E5A">HW 제어 · WS 통신</text>
+
+<!-- 범례 -->
+<rect x="30" y="497" width="12" height="8" rx="2" fill="none" stroke="#888780" stroke-width="0.5" stroke-dasharray="4 3"/>
+<text x="48" y="505" font-size="11" fill="#5F5E5A">팀원 담당 영역</text>
+</svg>
