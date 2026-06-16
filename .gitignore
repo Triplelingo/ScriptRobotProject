@@ -1,0 +1,28 @@
+# React 의존성
+client/node_modules/
+client/dist/
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# 가상환경
+.venv/
+venv/
+
+# 녹음 파일
+server/recordings/
+*.wav
+*.mp3
+*.webm
+
+# 환경변수
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
