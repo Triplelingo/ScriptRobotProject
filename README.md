@@ -34,7 +34,6 @@ Triplelingo/
 ---
 
 ## 기술 스택
-![Architecture](docs/architecture.svg)
 
 | 구분 | 기술 |
 |------|------|
@@ -89,6 +88,12 @@ python ws_client.py
 
 > 서버가 먼저 실행된 상태여야 WebSocket 연결이 됩니다.  
 > 기본 연결 주소: `ws://192.168.0.108:8000/ws/robot`
+
+---
+
+## 시스템 흐름 및 담당 역할
+
+![Architecture](docs/architecture.svg)
 
 ---
 
