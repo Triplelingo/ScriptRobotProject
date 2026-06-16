@@ -1,4 +1,5 @@
 # Triplelingo 🤖
+![User Flow](docs/user_flow.svg)
 
 영어 대본 연습용 로봇 시스템.  
 사용자가 웹에 영어 대본을 업로드하면, Raspberry Pi 5 기반 로봇이 상대방 역할을 수행하며 발음 피드백을 제공한다.
