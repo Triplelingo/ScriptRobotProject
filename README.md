@@ -6,6 +6,16 @@
 
 ---
 
+## Triplelingo를 통해 할 수 있는 것
+
+![Upload](docs/upload.jpeg)
+![Robot](docs/robot.jpeg)
+![History](docs/history.jpeg)
+
+
+
+---
+
 ## 주요 기능
  
 | 기능 | 설명 |
