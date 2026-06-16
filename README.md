@@ -130,8 +130,8 @@ python ws_client.py
 
 ## 팀
 
-| 이름 | 담당 |
-|------|------|
-| 장혜미 (팀장) | 하드웨어 제어, WebSocket 통신, RPi5 클라이언트 |
-| 윤설희 | 감정 분류, 대본 파싱, MySQL DB 설계 |
-| 비다 | TTS/STT/발음 평가, React 프론트엔드 |
+| 이름 | 담당 | 개인 깃 주소 |
+|------|------|-------------|
+| 장혜미 (팀장) | 하드웨어 제어, WebSocket 통신, RPi5 클라이언트 | https://github.com/jang-hyemi |
+| 윤설희 | 감정 분류, 대본 파싱, MySQL DB 설계 |  https://github.com/tjfgml12 |
+| 비다 | TTS/STT/발음 평가, React 프론트엔드 | https://github.com/vida2398 |
