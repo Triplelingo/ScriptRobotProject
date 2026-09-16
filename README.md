@@ -6,7 +6,7 @@
 
 ---
 
-## Triplelingo를 통해 할 수 있는 것
+## Triplelingo를 통해 할 수 있는 것!!
 
 ![Upload](docs/upload.jpeg)
 ![Robot](docs/robot.jpeg)
