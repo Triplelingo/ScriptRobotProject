@@ -21,11 +21,7 @@ function Navbar() {
   const menus = [
     { name: '대본 목록', path: '/upload' },
     { name: '연습 기록', path: '/history' },
-    { name: '설정', path: '/settings' },
-    { name: '대본 미리보기', path: '/preview' },
-    { name: '인물 배정', path: '/character' },
-    { name: '연습 진행', path: '/practice' },
-    { name: '연습 결과', path: '/result' }
+    { name: '설정', path: '/settings' }
 ]
 
   const handleLogout = () => {
