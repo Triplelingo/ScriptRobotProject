@@ -1,5 +1,6 @@
 # RPi5 WebSocket 클라이언트
 from servo_controller import perform, reset
+from lcd_mouth import animate_speaking, close_mouth   # LCD 입모양 애니메이션 모듈
 import asyncio
 import json
 import base64
@@ -11,6 +12,7 @@ import lgpio
 import sounddevice as sd
 import numpy as np
 import threading
+import os # 환경변수(SERVER_HOST, SERVER_PORT) 읽기용
 stop_event = threading.Event()
 
 
@@ -25,8 +27,10 @@ def set_leds(count):
     for i, pin in enumerate(LED_PINS):
         lgpio.gpio_write(h, pin, 1 if i < count else 0)
 
-# 서버 주소
-SERVER_URL = "ws://192.168.0.108:8000/ws/robot"
+# 서버 주소: 환경변수로 호스트·포트를 바꿀 수 있게 구성 (미지정 시 집 노트북 IP 사용)
+SERVER_HOST = os.getenv("SERVER_HOST", "192.168.0.108")  # 핫스팟 환경에서는 192.168.137.1로 지정
+SERVER_PORT = os.getenv("SERVER_PORT", "8000")           # FastAPI(uvicorn) 포트
+SERVER_URL = f"ws://{SERVER_HOST}:{SERVER_PORT}/ws/robot"  # 최종 WebSocket 엔드포인트
 current_line_id: int | None = None
 recording = False
 
@@ -75,12 +79,12 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str):
 
     #감정 별 동작 시간 
     action_duration = {
-        "joy": 0.6,
+        "joy": 1.0,
         "surprise": 1.6,  # 올림
-        "anger": 0.6,
-        "sadness": 1.8,   # 올림
-        "fear": 1.8,      # 올림
-        "disgust": 0.6,
+        "anger": 1.0,
+        "sadness": 2.0,   # 올림
+        "fear": 2.0,      # 올림
+        "disgust": 1.0,
         "neutral": 0.0,
     }
     one_action = action_duration.get(emotion, 0.6)
@@ -93,12 +97,18 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str):
         tmp_path = f.name
 
     subprocess.Popen(['aplay', '-D', 'plughw:0,0', tmp_path])
-    await asyncio.to_thread(perform, emotion, repeat_times)
+
+    # 서보 동작 + LCD 입모양 애니메이션을 동시에 재생 (둘 다 duration 기준으로 동기화)
+    await asyncio.gather(
+        asyncio.to_thread(perform, emotion, repeat_times),
+        asyncio.to_thread(animate_speaking, duration),
+    )
     reset()
 
 async def on_standby(ws):
     print("[RPi5] ⏳ standby — LED 모니터링 시작")
     reset()
+    close_mouth()
     # blocking 없이 백그라운드 스레드로 실행
     threading.Thread(target=monitor_led, daemon=True).start()
 
@@ -117,6 +127,7 @@ async def on_end_session():
     print("[RPi5] 🏁 세션 종료")
     set_leds(0)
     reset()
+    close_mouth()
 
 if __name__ == "__main__":
     asyncio.run(connect_with_retry())
