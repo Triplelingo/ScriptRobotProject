@@ -19,9 +19,10 @@ function Navbar() {
   }
 
   const menus = [
-    { name: '대본 업로드', path: '/upload' },
+    { name: '대본 목록', path: '/upload' },
     { name: '연습 기록', path: '/history' },
-  ]
+    { name: '설정', path: '/settings' }
+]
 
   const handleLogout = () => {
     localStorage.removeItem('loginUser')
