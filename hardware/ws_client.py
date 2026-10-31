@@ -1,6 +1,6 @@
 # RPi5 WebSocket 클라이언트
 from servo_controller import perform, reset
-from lcd_mouth import animate_speaking, close_mouth   # LCD 입모양 애니메이션 모듈
+
 import asyncio
 import json
 import base64
@@ -12,8 +12,14 @@ import lgpio
 import sounddevice as sd
 import numpy as np
 import threading
-import os # 환경변수(SERVER_HOST, SERVER_PORT) 읽기용
-stop_event = threading.Event()
+
+import time      # aplay 시작 시각(t0) 기록용
+import wave      # WAV 헤더에서 실제 재생 길이 계산
+import os        # 재생 끝난 임시 파일 삭제, 환경변수(SERVER_HOST, SERVER_PORT) 읽기용
+from lcd_mouth import animate_visemes, close_mouth   # 기존 animate_speaking import 줄을 이것으로 교체
+
+# 입 애니메이션 중단용 이벤트 (LED 모니터링용 stop_event와 분리)
+speak_stop = threading.Event()
 
 
 # LED 핀 설정
@@ -56,7 +62,8 @@ async def handle_messages(ws):
             current_line_id = msg["line_id"]
             audio_bytes = base64.b64decode(msg["audio_b64"])
             emotion = msg["emotion"]
-            await on_speak(ws, audio_bytes, emotion)
+            visemes = msg.get("visemes", [])   # 서버가 아직 안 보내면 빈 리스트 → 기존 뻐끔거림으로 폴백
+            await on_speak(ws, audio_bytes, emotion, visemes)
         elif msg_type == "standby":
             await on_standby(ws)
         elif msg_type == "end_recording":
@@ -70,20 +77,30 @@ async def handle_messages(ws):
         else:
             print(f"[RPi5] ⚠️  알 수 없는 타입: {msg_type}")
 
-async def on_speak(ws, audio_bytes: bytes, emotion: str):
-    print(f"[RPi5] 🔊 speak 처리 — emotion={emotion}, {len(audio_bytes):,} bytes")
+def wav_duration(audio_bytes: bytes) -> float:
+    """WAV 헤더를 읽어 실제 재생 길이(초)를 계산한다. 포맷·헤더 크기가 바뀌어도 정확함."""
+    try:
+        with wave.open(io.BytesIO(audio_bytes)) as w:
+            return w.getnframes() / w.getframerate()   # 총 프레임 수 ÷ 샘플레이트
+    except (wave.Error, EOFError):
+        # 헤더 파싱 실패 시 기존 고정식으로 대체 (16kHz/16bit/모노 가정)
+        return max(0.0, (len(audio_bytes) - 44) / (16000 * 2))
+
+async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
+    print(f"[RPi5] 🔊 speak 처리 — emotion={emotion}, {len(audio_bytes):,} bytes, viseme {len(visemes or [])}개")
     set_leds(0)
+    speak_stop.clear()   # 이전 중단 신호 초기화
 
-    # WAV 재생 시간 계산
-    duration = (len(audio_bytes) - 44) / (16000 * 2)
+    # WAV 헤더 기반 재생 시간 계산
+    duration = wav_duration(audio_bytes)
 
-    #감정 별 동작 시간 
+    # 감정별 서보 1회 동작 시간 (기존 값 유지)
     action_duration = {
         "joy": 1.0,
-        "surprise": 1.6,  # 올림
+        "surprise": 1.6,
         "anger": 1.0,
-        "sadness": 2.0,   # 올림
-        "fear": 2.0,      # 올림
+        "sadness": 2.0,
+        "fear": 2.0,
         "disgust": 1.0,
         "neutral": 0.0,
     }
@@ -91,18 +108,28 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str):
     repeat_times = max(1, int(duration / one_action)) if one_action > 0 else 1
     print(f"[RPi5] 재생 시간: {duration:.2f}초, 서보 반복: {repeat_times}회")
 
-    # WAV 임시 파일 저장 후 aplay로 재생
+    # WAV 임시 파일 저장
     with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
         f.write(audio_bytes)
         tmp_path = f.name
 
-    subprocess.Popen(['aplay', '-D', 'plughw:0,0', tmp_path])
+    try:
+        # aplay 실행 직후 시각을 립싱크 기준점(t0)으로 기록
+        proc = subprocess.Popen(['aplay', '-q', '-D', 'plughw:0,0', tmp_path])
+        t0 = time.monotonic()
 
-    # 서보 동작 + LCD 입모양 애니메이션을 동시에 재생 (둘 다 duration 기준으로 동기화)
-    await asyncio.gather(
-        asyncio.to_thread(perform, emotion, repeat_times),
-        asyncio.to_thread(animate_speaking, duration),
-    )
+        # 서보 동작 + viseme 립싱크 + aplay 종료 대기를 동시에 진행
+        await asyncio.gather(
+            asyncio.to_thread(perform, emotion, repeat_times),
+            asyncio.to_thread(animate_visemes, visemes, duration, t0, speak_stop),
+            asyncio.to_thread(proc.wait),   # 소리가 실제로 끝날 때까지 대기
+        )
+    finally:
+        # 재생이 끝났거나 예외가 나도 임시 파일은 반드시 삭제
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
     reset()
 
 async def on_standby(ws):
@@ -125,9 +152,11 @@ def monitor_led():
 
 async def on_end_session():
     print("[RPi5] 🏁 세션 종료")
+    speak_stop.set()   # 진행 중인 입 애니메이션 중단
     set_leds(0)
     reset()
     close_mouth()
+    
 
 if __name__ == "__main__":
-    asyncio.run(connect_with_retry())
+    asyncio.run(connect_with_retry())   # 서버 접속 + 메시지 수신 루프 시작
