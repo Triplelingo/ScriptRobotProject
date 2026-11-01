@@ -213,6 +213,12 @@ async def handle_text(msg: dict):
     """
     RPi5 → 서버: JSON 텍스트 메시지 처리.
     """
+    global robot_volume
+    if msg.get("type") == "volume_state":
+        # RPi가 접속할 때 알려주는 실제 볼륨 → 웹 표시와 동기화
+        robot_volume = int(msg.get("volume", robot_volume))
+        print(f"[서버] 🔈 RPi5 볼륨 보고: {robot_volume}%")
+        return
     global current_reference_text
     msg_type = msg.get("type")
     print(f"[서버] 📨 텍스트 수신: type={msg_type}, 내용={msg}")
@@ -253,6 +259,29 @@ async def send_to_robot(payload: dict) -> bool:
     except Exception as e:
         print(f"[서버] ❌ 명령 전송 중 오류 발생: {e}")
         return False                     # 전송 중 끊김 등
+
+from pydantic import BaseModel
+
+robot_volume = 100    # RPi 현재 볼륨 (RPi 접속 시 RPi가 보고한 값으로 갱신)
+
+
+class VolumeRequest(BaseModel):
+    volume: int
+
+
+@router.get("/api/robot/volume")
+async def get_robot_volume():
+    """웹 화면 진입 시 현재 볼륨 표시용"""
+    return {"volume": robot_volume}
+
+
+@router.post("/api/robot/volume")
+async def set_robot_volume(req: VolumeRequest):
+    """웹에서 볼륨 변경 → 서버에 기억 + RPi로 전달"""
+    global robot_volume
+    robot_volume = max(0, min(150, req.volume))
+    sent = await send_to_robot({"type": "set_volume", "volume": robot_volume})
+    return {"volume": robot_volume, "sent": sent}
 
 @router.get("/api/robot/status")
 async def robot_status():

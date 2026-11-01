@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-
+import VolumeControl from '../components/VolumeControl'   // 상단 import에 추가
 
 // 로봇(RPi5)에 대사 재생 요청 후, 로봇이 말하는 시간만큼 대기
 // 반환값: 'ok'(정상) | 'no_robot'(RPi 미연결) | 'error'(TTS·서버 오류)
@@ -562,6 +562,7 @@ function PracticePage() {
             >
               {connWarning || robotStatus}                    {/* 경고 우선 표시, 없으면 말하기/듣기 모드 */}
             </div>
+            <VolumeControl /> 
             <div style={{ fontSize: '12px', color: '#64748B' }}>
               {isMyTurn ? '버튼을 눌러 대사를 녹음하세요.' : 'AI 상대역의 대사를 듣고 다음으로 이동하세요.'}
             </div>
