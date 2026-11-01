@@ -22,7 +22,7 @@ servo_pan  = servo.Servo(pca.channels[2], actuation_range=180, **_DS3120_PULSE) 
 # 중립 각도 상수 — 여기만 수정하면 전체 반영됨
 # 2026-09 DS3120 교체 후 재보정된 실측값
 # =========================================================
-NEUTRAL_TILT = 70
+NEUTRAL_TILT = 80
 NEUTRAL_ROLL = 99
 NEUTRAL_PAN  = 70
 
