@@ -18,6 +18,7 @@ LCD 입 모양 애니메이션 모듈 (Azure TTS viseme 기반 립싱크).
 - animate_visemes(timeline, duration=None, t0=None, stop_event=None) : viseme 립싱크
 - animate_speaking(duration, interval=0.15, stop_event=None)        : 기존 뻐끔거림 (폴백용)
 - close_mouth()                                                     : 입 다문 상태로 리셋
+- show_wave(levels)                                                 : 사용자 발화 파형 한 프레임 표시
 """
 
 import sys
@@ -27,8 +28,9 @@ from bisect import bisect_right
 
 from luma.core.interface.serial import spi
 from luma.lcd.device import ili9486
+from luma.core.framebuffer import diff_to_previous
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
-from luma.core.framebuffer import diff_to_previous   # 다른 import 줄들 아래에 추가
+
 # ─────────────────────────────────────────────────────────────
 # SPI/LCD 초기화 — 모듈 임포트 시 한 번만 실행
 # rotate=1: 패널 물리 장착 방향(90도) 보정값, 실측으로 확인된 값
@@ -38,6 +40,7 @@ _serial = spi(port=0, device=0, gpio_DC=24, gpio_RST=25, bgr=True, bus_speed_hz=
 # num_segments=1: 바뀐 영역을 16개 블록으로 쪼개지 않고 사각형 하나로 전송 → 입이 바뀔 때 블록이 뒤섞여 보이는 현상 완화
 _device = ili9486(_serial, width=320, height=480, rotate=1, framebuffer=diff_to_previous(num_segments=1))
 _device.command(0x20)   # 패널 기본값이 색 반전 상태라 초기화 직후 반전 해제 (INVOFF, 실측 확인)
+
 _W, _H = _device.size        # 회전 적용 후 (480, 320)
 _CX, _CY = _W // 2, _H // 2  # 입 모양 중심 좌표
 
@@ -428,9 +431,48 @@ def close_mouth():
 
 
 # ─────────────────────────────────────────────────────────────
+# 사용자 발화 파형 표시 ("듣고 있어요" 피드백)
+# - 입 영역(_RW×_RH) 안에만 그려서 입 모양과 같은 전송 속도(약 13fps)를 유지
+# - levels: 0.0~1.0 값 리스트 (왼쪽이 과거, 오른쪽이 최신) → 막대 높이로 표시
+# ─────────────────────────────────────────────────────────────
+WAVE_BARS = 21                   # 막대 개수 (홀수: 가운데 기준 좌우 대칭)
+WAVE_COLOR = (96, 165, 250)      # 조용할 때 막대 색 (하늘색)
+WAVE_PEAK = (186, 230, 255)      # 소리가 클 때 막대 색 (밝은 하늘색)
+
+
+def _wave_frame(levels) -> Image.Image:
+    """파형 막대를 그린 전체 화면 이미지(480×320)를 만든다. 배경은 검정 고정."""
+    frame = Image.new("RGB", (_W, _H), BG)
+    d = ImageDraw.Draw(frame)
+    n = len(levels)
+    slot = _RW / n                                   # 막대 하나가 차지하는 가로 칸
+    bar_w = max(3, int(slot * 0.55))                 # 막대 두께 (칸의 55%)
+    x_left = _CX - _RW / 2
+    for i, lv in enumerate(levels):
+        lv = max(0.0, min(1.0, lv))
+        h = max(6, int(_RH * 0.95 * lv))             # 최소 6px: 조용할 때도 점선처럼 보이게
+        x0 = int(x_left + slot * i + (slot - bar_w) / 2)
+        y0 = _CY - h // 2                            # 세로 가운데 기준 위아래 대칭
+        # 소리 크기에 따라 기본색 → 밝은색으로 보간
+        color = tuple(int(a + (b - a) * lv) for a, b in zip(WAVE_COLOR, WAVE_PEAK))
+        d.rounded_rectangle([x0, y0, x0 + bar_w, y0 + h], radius=bar_w // 2, fill=color)
+    return frame
+
+
+def show_wave(levels) -> None:
+    """파형 한 프레임을 LCD에 표시한다. (약 70ms 블로킹)"""
+    global _current_shape
+    img = _wave_frame(levels)
+    with _lock:
+        _device.display(img)
+        _current_shape = None   # 입 모양이 아닌 화면이 떠 있음 → 다음 _show()가 반드시 다시 그리게 함
+
+
+# ─────────────────────────────────────────────────────────────
 # 단독 실행 테스트
 #   python lcd_mouth.py shapes : 11개 입 모양을 하나씩 표시 (디자인 확인용)
 #   python lcd_mouth.py demo   : 더미 타임라인으로 립싱크 재생 + 프레임 드롭 확인
+#   python lcd_mouth.py wave   : 가짜 소리 크기로 파형 표시 + fps 확인
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "demo"
@@ -458,5 +500,19 @@ if __name__ == "__main__":
         print(f"[demo] {elapsed:.2f}s 동안 {result['shown']}프레임 표시 "
               f"(viseme {result['events']}개)")
 
+    elif mode == "wave":
+        # 마이크 없이 가짜 소리 크기로 파형 표시 확인 (5초)
+        import math, random
+        from collections import deque
+        hist = deque([0.0] * WAVE_BARS, maxlen=WAVE_BARS)
+        t_start, n = time.monotonic(), 0
+        while time.monotonic() - t_start < 5:
+            t = time.monotonic() - t_start
+            hist.append(abs(math.sin(t * 3)) * random.uniform(0.5, 1.0))   # 말하는 듯한 들쭉날쭉한 크기
+            show_wave(list(hist))
+            n += 1
+        print(f"[wave] 5초 동안 {n}프레임 ({n / 5:.1f} fps)")
+        close_mouth()
+
     else:
-        print("사용법: python lcd_mouth.py [shapes|demo]")
+        print("사용법: python lcd_mouth.py [shapes|demo|wave]")
