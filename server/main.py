@@ -6,7 +6,7 @@ import io
 import uuid
 import shutil
 import wave   # TTS 음성 길이 계산용
-
+import asyncio
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import Response
@@ -795,7 +795,8 @@ async def robot_speak_to_rpi5(req: RobotSpeakRequest):
     synthesizer.viseme_received.connect(on_viseme)   # 합성 시작 전에 콜백 등록해야 이벤트를 받음
     # ────────────────────────────────────────────────────────
 
-    result = synthesizer.speak_ssml_async(ssml).get()   # 합성 완료까지 대기 (이 동안 on_viseme 호출됨)
+    # 합성을 별도 스레드에서 실행 → 기다리는 동안에도 서버가 다른 요청·연결 확인(ping)을 처리할 수 있음
+    result = await asyncio.to_thread(lambda: synthesizer.speak_ssml_async(ssml).get())
     del synthesizer
 
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:

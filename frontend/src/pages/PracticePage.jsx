@@ -237,6 +237,9 @@ function PracticePage() {
     if (isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
+      // 로봇에 녹음 종료 알림 → LCD 파형을 끄고 다문 입으로 복귀
+      fetch('http://localhost:8000/api/robot/end_recording', { method: 'POST' })
+        .catch((err) => console.warn('로봇 녹음 종료 전송 실패:', err))
     } else {
       audioChunksRef.current = []
       try {
@@ -311,6 +314,9 @@ function PracticePage() {
 
         mediaRecorderRef.current.start()
         setIsRecording(true)
+        // 로봇에 "사용자 차례 시작" 알림 → LCD에 발화 파형 표시
+        fetch('http://localhost:8000/api/robot/standby', { method: 'POST' })
+          .catch((err) => console.warn('로봇 standby 전송 실패:', err))
       } catch (err) {
         alert('마이크 사용 권한을 확인해 주세요.')
       }
