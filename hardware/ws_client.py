@@ -8,7 +8,7 @@
 #   end_session  : 세션 종료 (서보·입 모양 초기화)
 # 실행: python -u ws_client.py   (핫스팟 환경: SERVER_HOST=192.168.137.1 python -u ws_client.py)
 # ─────────────────────────────────────────────────────────────
-from servo_controller import perform, reset
+from servo_controller import speak_motion, listen, release, reset   # v2 모션 엔진 (50Hz 백그라운드 스레드)
 from lcd_mouth import animate_visemes, close_mouth, show_wave, WAVE_BARS   # 파형 표시 추가
 import math                          # dB 변환용
 from collections import deque        # 파형 기록용
@@ -146,7 +146,8 @@ async def handle_messages(ws):
             audio_bytes = base64.b64decode(msg["audio_b64"])
             emotion = msg["emotion"]
             visemes = msg.get("visemes", [])   # 서버가 안 보내면 빈 리스트 → 뻐끔거림으로 폴백
-            await on_speak(ws, audio_bytes, emotion, visemes)
+            intensity = float(msg.get("intensity", 1.0))   # 감정 세기 (서버가 confidence 기반으로 보내면 반영, 없으면 1.0)
+            await on_speak(ws, audio_bytes, emotion, visemes, intensity)
         elif msg_type == "standby":
             await on_standby(ws)
         elif msg_type == "end_recording":
@@ -171,7 +172,7 @@ def wav_duration(audio_bytes: bytes) -> float:
         return max(0.0, (len(audio_bytes) - 44) / (16000 * 2))
 
 
-async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
+async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None, intensity: float = 1.0):
     """TTS 음성 재생 + 감정별 서보 동작 + LCD 립싱크를 동시에 수행"""
     print(f"[RPi5] 🔊 speak 처리 — emotion={emotion}, {len(audio_bytes):,} bytes, viseme {len(visemes or [])}개")
     await asyncio.to_thread(stop_wave)    # 파형이 켜져 있으면 끄고 LCD를 입 모양에 넘김
@@ -180,21 +181,10 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
     # WAV 헤더 기반 재생 시간 계산
     duration = wav_duration(audio_bytes)
 
-    # 감정별 서보 1회 동작 시간(초) — servo_controller.perform()의 실제 1회 소요 시간 기준
-    # 이 값이 실제보다 작으면 반복 횟수가 과하게 계산되어 말이 끝난 뒤에도 서보가 움직임
-    action_duration = {
-        "joy": 1.0,
-        "surprise": 1.6,
-        "anger": 1.0,
-        "sadness": 2.0,
-        "fear": 2.0,
-        "disgust": 1.0,
-        "neutral": 0.0,
-    }
-    one_action = action_duration.get(emotion, 0.6)
-    repeat_times = max(1, int(duration / one_action)) if one_action > 0 else 1
-    print(f"[RPi5] 재생 시간: {duration:.2f}초, 서보 반복: {repeat_times}회")
+    # v2: 서보는 재생 시간 동안 엔진이 연속 제어 → 반복 횟수 계산(action_duration) 불필요
+    print(f"[RPi5] 재생 시간: {duration:.2f}초")
 
+    motion_src = audio_bytes                # 비트 추출용 원본 (증폭 전 — 클리핑 없는 포락선)
     audio_bytes = apply_gain(audio_bytes)   # 100% 초과 증폭 (또는 믹서 없는 스피커의 볼륨 조절)
 
     # WAV 임시 파일 저장
@@ -209,7 +199,7 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
 
         # 서보 동작 + viseme 립싱크 + aplay 종료 대기를 동시에 진행
         await asyncio.gather(
-            asyncio.to_thread(perform, emotion, repeat_times),
+            asyncio.to_thread(speak_motion, emotion, motion_src, duration, t0, speak_stop, intensity),  # 같은 t0 → 립싱크와 비트 동기
             asyncio.to_thread(animate_visemes, visemes, duration, t0, speak_stop),
             asyncio.to_thread(proc.wait),   # 소리가 실제로 끝날 때까지 대기
         )
@@ -219,12 +209,12 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
             os.remove(tmp_path)
         except OSError:
             pass
-    reset()
+    release()   # 대사 끝 → 감정 자세에서 중립으로 천천히 복귀 (non-blocking)
 
 
 async def on_standby(ws):
     print("[RPi5] ⏳ standby — 사용자 발화 파형 표시 시작")
-    reset()
+    listen()              # 경청 자세 (v1 reset()은 1.5초 blocking → 파형 시작이 늦었음)
     start_wave()          # LCD에 사용자 발화 파형 표시 시작
 
 
