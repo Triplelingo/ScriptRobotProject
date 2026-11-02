@@ -132,7 +132,7 @@ v2 모션 엔진 (2026-11). 50Hz 백그라운드 스레드가 매 틱 3축을 �
 |---|---|---|
 | PCA9685 (서보 3축) | I²C | GPIO2 SDA, GPIO3 SCL, 주소 0x40, 50Hz |
 | 3.5인치 TFT LCD (ILI9486) | SPI0 CE0 | DC=GPIO24, RST=GPIO25, 16MHz, 점퍼선 배선 |
-| 스피커 | USB | ALSA 카드 0 (`plughw:0,0`), 믹서 `PCM` |
+| 스피커 | USB | ALSA 카드 **이름** `UACDemoV10` (`plughw:CARD=UACDemoV10,DEV=0`), 믹서 `PCM`. 다른 스피커는 `SPEAKER_CARD=<aplay -l의 이름>` |
 | 마이크 | USB | sounddevice 기본 입력, 16kHz |
 
 - 서보 전원: 5V 5A 어댑터 → PCA9685 배럴잭 (RPi와 분리, **GND 공유**. 공유 안 하면 스피커 잡음)
@@ -163,6 +163,8 @@ luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpyt
 | TILT·PAN 축 떨림 (2026-09) | MG996R 토크(약 11kg·cm) < 필요 토크(약 12kg·cm) | DS3120 교체로 해결, 카운터웨이트 불필요 |
 | 이동·복귀 중에만 지지직 (2026-11, 유지 중엔 조용) | 저속 이동 + DS3120 데드밴드 → 멈춤·툭 반복 (전원·토크 문제 아님) | 최소 속도 보장·느린 미세동작 제거 (위 '저속 이동 금지' 참고) |
 | demo 중 3축이 심하게 떪 | `ws_client.py`와 demo가 동시에 PCA9685에 씀 | `pgrep -af ws_client` 확인 후 `pkill -f ws_client.py` |
+| 스피커 무음, `Playback open error: -2` / 볼륨 믹서 PCM 못 찾음 (2026-11-03) | USB 카드 번호가 재부팅·재연결로 바뀜(0→1), 코드가 번호로 고정돼 있었음 | 카드 이름으로 지정(`ALSA_CARD`·`ALSA_DEVICE`). 이름은 `aplay -l`로 확인 |
+| 스피커 무음, `Playback open error: -2` / 볼륨 믹서 PCM 못 찾음 (2026-11-03) | USB 카드 번호가 재부팅·재연결로 바뀜(0→1), 코드가 번호로 고정돼 있었음 | 카드 이름으로 지정(`ALSA_CARD`·`ALSA_DEVICE`). 이름은 `aplay -l`로 확인 |
 
 ---
 

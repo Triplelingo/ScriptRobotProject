@@ -34,7 +34,8 @@ speak_stop = threading.Event()    # 입 애니메이션 중단용 (stop_event와
 # 볼륨 제어: 0~100%는 ALSA 믹서(PCM), 100% 초과는 소프트웨어 증폭
 # ─────────────────────────────────────────────────────────────
 VOLUME_FILE = os.path.expanduser("~/.robot_volume")   # 마지막 볼륨 저장 위치 (재부팅 후 유지)
-ALSA_CARD = "0"                                       # aplay -D plughw:0,0 과 같은 카드 번호
+ALSA_CARD = os.getenv("SPEAKER_CARD", "UACDemoV10")   # 카드 번호 대신 이름으로 지정 — USB 재연결·재부팅 시 번호가 바뀜 (2026-11-03 0→1)
+ALSA_DEVICE = f"plughw:CARD={ALSA_CARD},DEV=0"      # aplay 재생 장치
 current_volume = 60                                   # 현재 볼륨(%)
 
 
@@ -194,7 +195,7 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None, intensity
 
     try:
         # aplay 실행 직후 시각을 립싱크 기준점(t0)으로 기록
-        proc = subprocess.Popen(['aplay', '-q', '-D', 'plughw:0,0', tmp_path])
+        proc = subprocess.Popen(['aplay', '-q', '-D', ALSA_DEVICE, tmp_path])
         t0 = time.monotonic()
 
         # 서보 동작 + viseme 립싱크 + aplay 종료 대기를 동시에 진행
