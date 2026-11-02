@@ -354,6 +354,17 @@ def login_user(data: dict = Body(...)):
 # 4. CUSTOM SCENARIO PARSING & SELECTION DATA-LOGS
 # ====================================================================
 @app.delete("/scripts/{script_id}")
+def delete_script(script_id: int):
+    # 트랜잭션 단위로 자식 → 부모 순서로 삭제 (FK 제약 위반 방지)
+    with engine.begin() as conn:
+        # 해당 대본의 대사 라인 먼저 삭제 (FK에 ON DELETE CASCADE가 있으면 생략 가능)
+        conn.execute(text("DELETE FROM script_lines WHERE script_id = :sid"), {"sid": script_id})
+        # 대본 본문 삭제
+        result = conn.execute(text("DELETE FROM scripts WHERE script_id = :sid"), {"sid": script_id})
+        # 삭제된 행이 없으면 존재하지 않는 대본
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="대본을 찾을 수 없습니다.")
+    return {"success": True, "message": "대본 삭제 완료"}
 
 @app.post("/scripts/upload")
 async def upload_script(
@@ -482,8 +493,14 @@ def create_script(data: dict = Body(...)):
 @app.get("/scripts")
 def get_scripts():
     with engine.connect() as conn:
+        # category·level 컬럼을 SELECT에 추가 (프론트 카테고리 필터·배지에서 사용)
         result = conn.execute(
-            text("SELECT script_id, user_id, title, content, created_at FROM scripts ORDER BY script_id DESC")
+            text("""
+                SELECT script_id, user_id, title, content,
+                       category, level, created_at
+                FROM scripts
+                ORDER BY script_id DESC
+            """)
         )
         scripts = []
         for row in result:
@@ -492,6 +509,8 @@ def get_scripts():
                 "user_id": row.user_id,
                 "title": row.title,
                 "content": row.content,
+                "category": row.category,      # 프론트 필터 기준값 ('일상회화', '영화/드라마' 등)
+                "level": row.level,            # 난이도 배지 표시용
                 "created_at": str(row.created_at)
             })
         return scripts
