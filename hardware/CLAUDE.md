@@ -24,13 +24,10 @@
 | `test_lcd.py` | LCD 출력 확인 (흰 원) | `lcd_mouth.py`와 같은 설정으로 맞춰 둠 |
 | `test_servo.py` | CH0 서보 0→90→180→90 | ⚠️ DS3120 펄스폭(`min_pulse=500, max_pulse=2500`) 미적용 → 실제 각도와 어긋남. 쓸 거면 수정 필요 |
 
-### 필요 없는 파일
+### 삭제된 파일·기능 (참고)
 
-| 파일 | 이유 |
-|---|---|
-| `led_mic.py` | 녹음 LED 테스트용. **LED는 최종 하드웨어에서 제외.** 핀도 `[16, 6, 26]`으로 `ws_client.py`(`[13, 6, 26]`)와 다름 |
-
-> `ws_client.py`에도 LED 코드(`LED_PINS`, `set_leds`)가 남아 있음. 동작에는 영향 없으나 정리 대상.
+- **녹음 레벨 LED**: 최종 하드웨어에서 제외. `led_mic.py` 삭제, `ws_client.py`의 LED 코드(`LED_PINS`, `set_leds`, `import lgpio`) 제거 완료 (2026-11). 녹음 중 피드백은 LCD 발화 파형으로 대체
+- 백업·임시 점검 파일(`*_old.py`, `*_backup.py`, `bench_lcd.py`, `test_color.py`)은 만들어도 커밋하지 않음 — 예전 버전은 Git 기록으로 확인
 
 ---
 
@@ -130,7 +127,9 @@ python -u ws_client.py                           # 시작 직후 0.6초 동안 �
 ---
 
 ## 주요 의존성
-luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpython-motor, sounddevice, numpy, websockets, lgpio (venv: `~/ScriptRobotProject/.venv`)
+luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpython-motor, sounddevice, numpy, websockets (venv: `~/ScriptRobotProject/.venv`)
+
+> `ws_client.py`는 `lgpio`를 직접 쓰지 않지만, luma가 GPIO(DC·RST 핀) 제어에 내부적으로 사용하므로 패키지는 삭제하지 말 것
 
 ---
 
@@ -154,6 +153,5 @@ luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpyt
 ## TODO
 - [ ] 부팅 시 `ws_client.py` 자동 실행 (systemd)
 - [ ] 대회장 네트워크 리허설 (휴대폰 테더링 + 노트북 핫스팟 `192.168.137.x`)
-- [ ] `ws_client.py`의 LED 코드 제거, `led_mic.py` 삭제
 - [ ] `test_servo.py`에 DS3120 펄스폭 반영
 - [ ] 서보 전원 5V 고정 → 토크 부족 재발 시 6~7V 어댑터 검토 (DS3120: 21.5kg·cm@5V / 25kg·cm@6.8V)
