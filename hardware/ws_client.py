@@ -198,11 +198,13 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None, intensity
         t0 = time.monotonic()
 
         # 서보 동작 + viseme 립싱크 + aplay 종료 대기를 동시에 진행
-        await asyncio.gather(
+        # 서보 동작 + viseme 립싱크 + aplay 종료 대기를 동시에 진행
+        n_beats, _, _ = await asyncio.gather(   # 첫 번째 반환값 = speak_motion이 잡은 비트 개수
             asyncio.to_thread(speak_motion, emotion, motion_src, duration, t0, speak_stop, intensity),  # 같은 t0 → 립싱크와 비트 동기
             asyncio.to_thread(animate_visemes, visemes, duration, t0, speak_stop),
             asyncio.to_thread(proc.wait),   # 소리가 실제로 끝날 때까지 대기
         )
+        print(f"[RPi5] 🎵 비트 {n_beats}개 / {duration:.2f}초")   # 강세 추출 확인용 로그
     finally:
         # 재생이 끝났거나 예외가 나도 임시 파일은 반드시 삭제
         try:

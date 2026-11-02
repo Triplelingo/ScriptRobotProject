@@ -195,10 +195,14 @@ PROFILES = {
         drift=1.0, drift_iv=(2.5, 5.0), idle_amp=0.6, idle_speed=0.8, tremor=0.0,
         onset=[(0.0, 0, 0, 0), (0.2, 0, 6, 0), (0.5, 0, 0, 0)],   # 고개 홱 돌리기 → 외면 유지는 posture (느린 꼬리 제거)
     ),
-    "listen": dict(  # 사용자 발화 대기: 살짝 숙이고 갸웃 — 경청 자세. 마이크 잡음 줄이려 미세동작 최소화
-        posture=(-2, 0, 6), w=4.0, zeta=1.0,
+    # 사용자 발화 대기(녹음 중): 중립에서 가만히 — 움직임 없음
+    # 2026-11-03: 기존 경청 자세(PAN -2°, TILT +6°)는 최소 속도 때문에 녹음 버튼 누르는 순간 '휙' 이동 → 제거.
+    #   천천히 가면 저속 떨림, 빠르게 가면 휙 → 이 하드웨어에선 '움직이지 않는 것'이 가장 자연스러움.
+    #   드리프트도 0: 녹음 중 서보 기어 소음이 마이크에 들어가는 것도 막음
+    "listen": dict(
+        posture=(0, 0, 0), w=4.0, zeta=1.0,
         beat_amp=0.0, beat_side=0.0, beat_rate=1.0,
-        drift=0.5, drift_iv=(3.0, 6.0), idle_amp=0.4, idle_speed=0.7, tremor=0.0,
+        drift=0.0, drift_iv=(3.0, 6.0), idle_amp=0.0, idle_speed=0.7, tremor=0.0,
         onset=None,
     ),
 }

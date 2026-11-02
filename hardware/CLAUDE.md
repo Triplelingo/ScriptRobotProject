@@ -53,7 +53,7 @@ python -u ws_client.py                           # 시작 직후 0.6초 동안 �
 | type | 동작 |
 |---|---|
 | `speak` | TTS 재생(aplay) + 서보 고갯짓 + LCD viseme 립싱크를 동시에 (`asyncio.gather`) |
-| `standby` | 서보 중립 + **LCD 발화 파형 시작** (웹에서 녹음 시작 시 전송) |
+| `standby` | 서보 정지(`listen()`, 이동 없음) + **LCD 발화 파형 시작** (웹에서 녹음 시작 시 전송) |
 | `end_recording` | 파형 종료 → 다문 입 복귀 (웹에서 녹음 종료 시 전송) |
 | `set_volume` | 볼륨 변경 (웹 슬라이더) |
 | `end_session` | 입 애니메이션 중단, 서보·입 초기화 |
@@ -61,7 +61,8 @@ python -u ws_client.py                           # 시작 직후 0.6초 동안 �
 접속 직후 RPi → 서버로 `{"type": "volume_state", "volume": N}` 전송 (웹 슬라이더 표시 동기화).
 
 ### 유의점
-- **`action_duration`** (감정별 서보 1회 동작 시간): 반복 횟수 = 재생 시간 ÷ 이 값. 실제 동작 시간보다 작으면 **말이 끝난 뒤에도 서보가 계속 움직임.** 현재값 joy 1.0 / surprise 1.6 / anger 1.0 / sadness 2.0 / fear 2.0 / disgust 1.0. 서보 동작을 바꾸면 실측 후 갱신
+- **서보**: `speak_motion(emotion, 원본 WAV, duration, t0, speak_stop)` — 립싱크와 같은 `t0`을 넘겨야 끄덕임이 강세에 맞음. 비트 추출은 **증폭 전 원본 WAV**(`motion_src`)로 함. 대사 끝은 `release()`(non-blocking)
+- 로그 `🎵 비트 N개 / T초`: 강세 추출 확인용. 실측(2026-11-03, Azure TTS) joy 1.6 / surprise 1.2~1.5 / disgust 0.5~0.8개/초 — 대사마다 0개면 `extract_beats`의 `thresh` ↓
 - 볼륨: 0~100%는 ALSA `PCM` 믹서(`amixer -M`, 귀 기준 비율), 100% 초과(최대 150%)는 WAV 샘플 직접 증폭. 마지막 값은 `~/.robot_volume`에 저장, 없으면 60%
 - 재생 시간은 WAV 헤더로 계산(`wav_duration`). 고정식(`(len-44)/32000`) 쓰지 말 것
 - 임시 WAV는 재생 후 `finally`에서 삭제됨
@@ -99,16 +100,29 @@ python -u ws_client.py                           # 시작 직후 0.6초 동안 �
 
 ## servo_controller.py
 
+v2 모션 엔진 (2026-11). 50Hz 백그라운드 스레드가 매 틱 3축을 동시에 합성:
+`중립 + DIR × [스프링(감정 자세 + 시선 드리프트) + 시작 제스처 + 음성 비트(PAN 끄덕임) + fear 떨림(PAN)] → 속도 제한 → 가동 범위 클램프`
+
 - 3축 전부 **DS3120** (2026-09 MG996R에서 교체). 채널: CH0 TILT(고개 갸웃) / CH1 ROLL(좌우 회전) / CH2 PAN(끄덕임)
 - 서보 생성 시 **`min_pulse=500, max_pulse=2500` 필수** (adafruit_motor 기본 750~2250us면 각도 매핑 어긋남)
 - 중립각: `NEUTRAL_TILT = 80`, `NEUTRAL_ROLL = 99`, `NEUTRAL_PAN = 70` — 이 세 값만 바꾸면 모든 동작에 반영
-- 감정 매핑: joy→끄덕임, anger→좌우 흔들기, sadness→숙이기, surprise→끄덕임+젖히기, fear→sadness, disgust→anger, neutral→중립
-- `reset()`은 기본 1.5초 대기 포함
+- 방향: `DIR = {"pan": +1, "roll": +1, "tilt": -1}` (2026-11-03 calib 결과). 재조립 후 `python servo_controller.py calib`로 재확인
+- 감정별 값은 `PROFILES`만 수정: 자세(`posture`), 비트 깊이(`beat_amp`)·빈도(`beat_rate`), 시선 이동 폭(`drift`)·간격(`drift_iv`), 시작 제스처(`onset`)
+- 외부 API: `speak_motion`(blocking, to_thread용) / `listen`·`release`·`reset`(전부 non-blocking — v1 `reset()`의 1.5초 대기 없음) / `perform`(v1 호환, 비트 없음 — ws_client에서 쓰지 말 것)
+- 단독 실행: `calib`(축 방향) / `demo [감정] [--no-beat|--no-gesture|--no-drift|--no-tremor]` / `still`(고정 명령 10초, 떨림 진단)
+- `SERVO_PWM_HZ=100` 환경변수로 PWM 주파수 변경 가능 (기본 50Hz, 100·200Hz 발열·소음 없음 확인)
+
+### ⚠️ 저속 이동 금지 (2026-11-03 실측 — 되돌리지 말 것)
+- DS3120 데드밴드(3us ≈ 0.27°) 때문에 **약 15°/s 이하의 느린 이동**은 서보 내부에서 멈춤→툭이 반복돼 지지직 진동. 일정속도 테스트: 5°/s 떨림, 40°/s 깔끔. **유지 중에는 떨림 없음**
+- 대응: 3축 모두 이동 시 최소 속도 보장(`TERM_SPEED` pan 35 / roll 25 / tilt 35°/s). 1~2°짜리 느린 미세동작(아이들 흔들림 `IDLE_GAIN=0`, 비트 회전·갸웃 변주, TILT 드리프트, sadness 도리질, fear ROLL 떨림)은 제거
+- 새 동작을 넣을 때도 **1회 이동량 3° 이상, 속도 25°/s 이상** 유지. `beat_amp`는 3 이상(정점 ≈ `beat_amp × 11°/s`) 또는 0
+- `HOLD_BAND`(느린 구간 정지 유지 폭)는 1.0 이하 유지 — 키우면 정지 해제 순간 그만큼 한 번에 튐
 
 ### 재조립 시 필수 절차
 서보 혼을 다시 끼우거나 프레임을 재조립하면 중립각이 틀어짐.
 1. 서보 신호를 끊고(`duty_cycle = 0`) 손으로 정면 자세를 맞춘 뒤, 각도를 바꿔 가며 그 자세가 나오는 값 탐색
-2. `NEUTRAL_TILT/ROLL/PAN` 갱신 → `python -c "from servo_controller import reset; reset()"`로 확인
+2. `NEUTRAL_TILT/ROLL/PAN` 갱신 → `python servo_controller.py still`로 정면 자세 확인
+3. `python servo_controller.py calib`로 `DIR` 부호 재확인
 
 ---
 
@@ -147,6 +161,8 @@ luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpyt
 | RPi에서 `git push` 시 `vscode-git-*.sock ECONNREFUSED` | 끊긴 VS Code 세션의 인증 통로를 tmux 터미널이 물고 있음 | tmux 밖 새 터미널에서 push |
 | SSH 접속이 자주 끊김 / ping 50~140ms | Wi-Fi 절전 모드 | `nmcli ... 802-11-wireless.powersave 2` (적용 완료) |
 | TILT·PAN 축 떨림 (2026-09) | MG996R 토크(약 11kg·cm) < 필요 토크(약 12kg·cm) | DS3120 교체로 해결, 카운터웨이트 불필요 |
+| 이동·복귀 중에만 지지직 (2026-11, 유지 중엔 조용) | 저속 이동 + DS3120 데드밴드 → 멈춤·툭 반복 (전원·토크 문제 아님) | 최소 속도 보장·느린 미세동작 제거 (위 '저속 이동 금지' 참고) |
+| demo 중 3축이 심하게 떪 | `ws_client.py`와 demo가 동시에 PCA9685에 씀 | `pgrep -af ws_client` 확인 후 `pkill -f ws_client.py` |
 
 ---
 
@@ -154,4 +170,5 @@ luma.lcd, luma.core, Pillow, adafruit-circuitpython-pca9685, adafruit-circuitpyt
 - [ ] 부팅 시 `ws_client.py` 자동 실행 (systemd)
 - [ ] 대회장 네트워크 리허설 (휴대폰 테더링 + 노트북 핫스팟 `192.168.137.x`)
 - [ ] `test_servo.py`에 DS3120 펄스폭 반영
-- [ ] 서보 전원 5V 고정 → 토크 부족 재발 시 6~7V 어댑터 검토 (DS3120: 21.5kg·cm@5V / 25kg·cm@6.8V)
+- [ ] 서보 전원 5V 고정 → 토크 부족 재발 시 6~7V 어댑터 검토 (DS3120: 21.5kg·cm@5V / 25kg·cm@6.8V). 2026-11 진동은 전원 문제 아님(유지 테스트로 확인)
+- [ ] neutral·anger·fear 대사로 실제 TTS 비트 밀도·끄덕임 타이밍(`BEAT_LEAD`) 확인
