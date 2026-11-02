@@ -4,7 +4,7 @@ import VolumeControl from '../components/VolumeControl'   // 상단 import에 �
 
 // 로봇(RPi5)에 대사 재생 요청 후, 로봇이 말하는 시간만큼 대기
 // 반환값: 'ok'(정상) | 'no_robot'(RPi 미연결) | 'error'(TTS·서버 오류)
-const speakOnRobot = async (line) => {
+const speakOnRobot = async (line, characterVoice) => {
   const savedSettings = JSON.parse(localStorage.getItem('practiceSettings') || '{}')
 
   const res = await fetch('http://localhost:8000/api/robot/speak', {
@@ -14,7 +14,7 @@ const speakOnRobot = async (line) => {
       text: line.text,
       emotion: line.emotion || 'neutral',
       character: line.character,
-      voice: savedSettings.ttsVoice || 'Jenny',
+      voice: characterVoice || savedSettings.ttsVoice || 'Jenny',   // 캐릭터 화면에서 고른 목소리 우선
       speed: savedSettings.ttsSpeed || 1.0,
     }),
   })
@@ -35,6 +35,16 @@ function PracticePage() {
 
   const scriptId = location.state?.scriptId || 1
   const chosenRole = location.state?.chosenRole || 'Alex'
+
+  // 캐릭터별 로봇 목소리: CharacterPage에서 전달 → 없으면(새로고침 등) 대본별 저장값
+  const characterVoices = (() => {
+    if (location.state?.characterVoices) return location.state.characterVoices
+    try {
+      return JSON.parse(localStorage.getItem(`characterVoices:${scriptId}`) || '{}')
+    } catch {
+      return {}
+    }
+  })()
   const isListenOnly = chosenRole === 'LISTEN_ONLY'   // CharacterPage에서 '그냥 듣기' 선택 시 전달되는 값
 
   const [scriptTitle, setScriptTitle] = useState('')
@@ -175,7 +185,7 @@ function PracticePage() {
     setTtsLoading(true)   // 로봇이 말하는 동안 버튼 잠금
 
     try {
-      const result = await speakOnRobot(line)
+      const result = await speakOnRobot(line, characterVoices[line.character])
 
       if (result === 'ok') setConnWarning('')                          // 성공 시 경고 해제 (모드 표시는 건드리지 않음)
       else if (result === 'no_robot') setConnWarning('⚠️ 로봇 연결 안 됨')

@@ -661,6 +661,69 @@ async def update_script_line_emotion(
 # ====================================================================
 # 5. NATURAL EMOTIONAL TEXT-TO-SPEECH (BROWSER BINARY AUDIO RETURN)
 # ====================================================================
+# ─────────────────────────────────────────────────────────────
+# TTS 공통 설정 (웹·로봇 공통) — 2026-11-03
+#   - 감정 표현은 Azure 감정 스타일(express-as)로만 한다. pitch는 바꾸지 않는다
+#     (pitch를 ±10~20% 바꾸면 음색이 달라져 감정마다 다른 사람처럼 들림)
+#   - 목소리는 감정 스타일 6종을 모두 지원하는 Jenny(여) / Davis(남)만 사용
+#     (check_styles.py 실측: Andrew 0/6, Ava 2/6 → 이전 로봇 음성에서 감정 스타일이 대부분 무시됐음)
+# ─────────────────────────────────────────────────────────────
+from xml.sax.saxutils import escape as _ssml_escape   # 대본 텍스트의 &, <, > 이스케이프 (없으면 SSML이 깨져 합성 실패)
+
+# 선택 가능한 목소리 — check_styles.py 실측으로 감정 스타일 6종을 모두 지원하는 것만 (2026-11-03)
+#   id: 프론트·요청에서 쓰는 짧은 이름 / gender: 캐릭터 화면의 여성·남성 탭 분류
+TTS_VOICE_CATALOG = [
+    {"id": "Jenny", "azure": "en-US-JennyNeural", "gender": "female"},
+    {"id": "Aria",  "azure": "en-US-AriaNeural",  "gender": "female"},
+    {"id": "Jane",  "azure": "en-US-JaneNeural",  "gender": "female"},
+    {"id": "Nancy", "azure": "en-US-NancyNeural", "gender": "female"},
+    {"id": "Sara",  "azure": "en-US-SaraNeural",  "gender": "female"},
+    {"id": "Davis", "azure": "en-US-DavisNeural", "gender": "male"},
+    {"id": "Guy",   "azure": "en-US-GuyNeural",   "gender": "male"},
+    {"id": "Jason", "azure": "en-US-JasonNeural", "gender": "male"},
+    {"id": "Tony",  "azure": "en-US-TonyNeural",  "gender": "male"},
+]
+
+# 요청의 voice 값 → Azure 목소리. 예전 값(Ava/Andrew)이 들어와도 같은 성별의 지원 목소리로 매핑
+TTS_VOICES = {v["id"]: v["azure"] for v in TTS_VOICE_CATALOG}
+TTS_VOICES.update({"Ava": "en-US-JennyNeural", "Andrew": "en-US-DavisNeural"})
+DEFAULT_TTS_VOICE = "en-US-JennyNeural"
+
+# 감정 → (Azure 스타일, 말 속도 변화). pitch 항목은 일부러 없음
+TTS_EMOTION_STYLE = {
+    "joy":      ("cheerful",   +3),
+    "surprise": ("excited",    +5),
+    "anger":    ("angry",       0),
+    "sadness":  ("sad",        -5),
+    "fear":     ("terrified",  +3),
+    "disgust":  ("unfriendly", -3),
+    "neutral":  (None,          0),    # 스타일 없음 = 기본 음성
+}
+
+# 목소리별 실제 지원 스타일 (check_styles.py 결과: 카탈로그 전부 6/6). 목록에 없는 스타일은 기본 음성으로 처리
+_ALL_EMOTION_STYLES = {"cheerful", "excited", "angry", "sad", "terrified", "unfriendly"}
+TTS_SUPPORTED_STYLES = {v["azure"]: set(_ALL_EMOTION_STYLES) for v in TTS_VOICE_CATALOG}
+
+
+def build_ssml(text: str, emotion: str, voice_name: str, speed: float = 1.0,
+               intensity: float = 1.0) -> str:
+    """웹·로봇 공통 SSML 생성 — 같은 캐릭터는 어디서 재생해도 같은 목소리·같은 설정"""
+    style, rate_delta = TTS_EMOTION_STYLE.get((emotion or "neutral").lower(), (None, 0))
+    if style not in TTS_SUPPORTED_STYLES.get(voice_name, set()):
+        style = None                                  # 미지원 스타일은 명시적으로 기본 음성
+
+    rate_pct = rate_delta + (speed - 1.0) * 100       # 감정 속도 변화 + 사용자 속도 설정
+    degree = max(0.5, min(1.3, intensity))            # 스타일 세기: 기본 1.0 (이전 로봇 2.0은 과장)
+
+    body = f"<prosody rate='{rate_pct:+.0f}%'>{_ssml_escape(text)}</prosody>"
+    if style:
+        body = f"<mstts:express-as style='{style}' styledegree='{degree:.2f}'>{body}</mstts:express-as>"
+
+    return ("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+            "xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='en-US'>"
+            f"<voice name='{voice_name}'>{body}</voice></speak>")
+
+
 @app.post("/api/speak")
 async def robot_speak(
     text: str = Form(...),
@@ -687,48 +750,7 @@ async def robot_speak(
         male_characters = ["Alex", "Romeo", "Jack", "Interviewer", "Examiner", "Jake"]
         voice_name = "en-US-DavisNeural" if character in male_characters else "en-US-JennyNeural"
 
-        emo = (emotion or "neutral").lower()
-        if emo == "joy":
-            style = "cheerful"
-        elif emo == "sadness":
-            style = "sad"
-        elif emo == "anger":
-            style = "angry"
-        elif emo == "fear":
-            style = "whispering"
-        elif emo == "disgust":
-            style = "unfriendly"
-        elif emo == "surprise":
-            style = "excited"
-        else:
-            style = "default"
-
-        rate_pct = int(round((speed - 1.0) * 100))
-        rate_str = f"{'+' if rate_pct >= 0 else ''}{rate_pct}%"
-
-        safe_text = (
-            text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace('"', "&quot;")
-        )
-
-        if style != "default":
-            express_open = f"<mstts:express-as style='{style}' styledegree='1.0'>"
-            express_close = "</mstts:express-as>"
-        else:
-            express_open = ""
-            express_close = ""
-
-        ssml_string = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='en-US'>
-    <voice name='{voice_name}'>
-        {express_open}
-            <prosody rate='{rate_str}'>
-                {safe_text}
-            </prosody>
-        {express_close}
-    </voice>
-</speak>"""
+        ssml_string = build_ssml(text, emotion, voice_name, speed)   # 공통 SSML (로봇과 동일 설정)
 
         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
         result = synthesizer.speak_ssml_async(ssml_string).get()
@@ -750,6 +772,45 @@ async def robot_speak(
 # ====================================================================
 # 6. AUDIO TRANSCODING & PRONUNCIATION COGNITIVE CORE (RAM STREAMING)
 # ====================================================================
+# ─────────────────────────────────────────────────────────────
+# 캐릭터 목소리 선택용 API (캐릭터 화면에서 사용)
+# ─────────────────────────────────────────────────────────────
+class TtsPreviewRequest(BaseModel):
+    voice: str = "Jenny"          # TTS_VOICE_CATALOG의 id
+    text: str = "Hello, nice to meet you."
+    emotion: str = "neutral"
+
+
+@app.get("/api/tts/voices")
+async def list_tts_voices():
+    """선택 가능한 목소리 목록 (프론트가 하드코딩하지 않도록 서버가 단일 기준)"""
+    return [{"id": v["id"], "gender": v["gender"]} for v in TTS_VOICE_CATALOG]
+
+
+@app.post("/api/tts/preview")
+async def tts_preview(req: TtsPreviewRequest):
+    """목소리 미리듣기 — 브라우저에서 바로 재생할 WAV 반환 (로봇으로는 보내지 않음)"""
+    voice_name = TTS_VOICES.get(req.voice, DEFAULT_TTS_VOICE)
+    text = (req.text or "").strip()[:200] or "Hello, nice to meet you."   # 미리듣기는 짧게 (비용·대기시간)
+    ssml = build_ssml(text, req.emotion, voice_name)
+
+    speech_config = speechsdk.SpeechConfig(
+        subscription=os.getenv("AZURE_SPEECH_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION")
+    )
+    speech_config.set_speech_synthesis_output_format(
+        speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
+    )
+    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+    # 합성은 별도 스레드에서 — 기다리는 동안 로봇 WebSocket ping 처리가 막히지 않게 (CLAUDE.md 트러블슈팅 참고)
+    result = await asyncio.to_thread(lambda: synthesizer.speak_ssml_async(ssml).get())
+    del synthesizer
+
+    if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
+        raise HTTPException(status_code=502, detail="TTS 미리듣기 합성 실패")
+    return Response(content=result.audio_data, media_type="audio/wav")
+
+
 @app.post("/api/evaluate")
 async def evaluate_audio(
     reference_text: str = Form(...), 
@@ -975,32 +1036,9 @@ class RobotSpeakRequest(BaseModel):
 
 @app.post("/api/robot/speak")
 async def robot_speak_to_rpi5(req: RobotSpeakRequest):
-    EMOTION_STYLE = {
-        "joy":      ("cheerful",    "+8.0%",  "+12.0%"),
-        "surprise": ("excited",     "+12.0%", "+20.0%"),
-        "anger":    ("angry",       "+5.0%",  "-5.0%"),
-        "sadness":  ("sad",         "-15.0%", "-10.0%"),
-        "fear":     ("terrified",   "+18.0%", "+15.0%"),
-        "disgust":  ("unfriendly",  "-10.0%", "-6.0%"),
-        "neutral":  ("general",     "+0.0%",  "+0.0%"),
-    }
-    
-    voice_name = 'en-US-AvaNeural' if req.voice == 'Jenny' else 'en-US-AndrewNeural'
-    style, rate, pitch = EMOTION_STYLE.get(req.emotion, ("general", "+0.0%", "+0.0%"))
-
-    base_rate = float(rate.replace('%', '').replace('+', ''))
-    adjusted = base_rate + (req.speed - 1.0) * 100
-    rate = f"{'+' if adjusted >= 0 else ''}{adjusted:.1f}%"
-    
-    ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='en-US'>
-        <voice name='{voice_name}'>
-            <mstts:express-as style='{style}' styledegree='2.0'>
-                <prosody rate='{rate}' pitch='{pitch}'>
-                    {req.text}
-                </prosody>
-            </mstts:express-as>
-        </voice>
-    </speak>"""
+    # 목소리: 프론트 설정(ttsVoice) 기준. 감정 스타일을 모두 지원하는 Jenny/Davis로 통일
+    voice_name = TTS_VOICES.get(req.voice, DEFAULT_TTS_VOICE)
+    ssml = build_ssml(req.text, req.emotion, voice_name, req.speed)   # 공통 SSML (pitch 변경 없음, styledegree 1.0)
 
     speech_config = speechsdk.SpeechConfig(
         subscription=os.getenv("AZURE_SPEECH_KEY"),

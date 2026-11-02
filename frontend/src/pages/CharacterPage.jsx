@@ -1,5 +1,66 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+
+// =========================================================
+// 캐릭터 목소리 목록 — 서버(/api/tts/voices)가 기준, 서버 응답 전·실패 시 이 값 사용
+// 감정 스타일 6종을 모두 지원하는 Azure 목소리만 (server/main.py TTS_VOICE_CATALOG와 동일)
+// =========================================================
+const FALLBACK_VOICES = [
+  { id: 'Jenny', gender: 'female' },
+  { id: 'Aria', gender: 'female' },
+  { id: 'Jane', gender: 'female' },
+  { id: 'Nancy', gender: 'female' },
+  { id: 'Sara', gender: 'female' },
+  { id: 'Davis', gender: 'male' },
+  { id: 'Guy', gender: 'male' },
+  { id: 'Jason', gender: 'male' },
+  { id: 'Tony', gender: 'male' },
+]
+
+const GENDER_LABEL = { female: '여성', male: '남성' }
+const PREVIEW_FALLBACK_TEXT = 'Hello, nice to meet you.'
+
+// 대본별 캐릭터 목소리 저장소 (브라우저 localStorage) — DB 저장 전 임시 방식
+const loadSavedVoices = (key) => {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+const saveVoices = (key, map) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(map))
+  } catch {
+    // 저장 실패해도 이번 연습에는 navigate state로 전달되므로 무시
+  }
+}
+
+// 저장된 값이 없는 캐릭터에 서로 다른 목소리를 여·남 번갈아 자동 배정
+const assignDefaultVoices = (names, saved, voiceList) => {
+  const females = voiceList.filter((v) => v.gender === 'female').map((v) => v.id)
+  const males = voiceList.filter((v) => v.gender === 'male').map((v) => v.id)
+  const order = []
+  for (let i = 0; i < Math.max(females.length, males.length); i += 1) {
+    if (females[i]) order.push(females[i])
+    if (males[i]) order.push(males[i])
+  }
+
+  const validIds = new Set(voiceList.map((v) => v.id))
+  const result = {}
+  names.forEach((name) => {
+    if (saved[name] && validIds.has(saved[name])) result[name] = saved[name]   // 사용자가 고른 값 유지
+  })
+  const used = new Set(Object.values(result))
+  names.forEach((name, index) => {
+    if (result[name]) return
+    const next = order.find((id) => !used.has(id)) || order[index % order.length]   // 목소리 수 초과 시 순환 재사용
+    result[name] = next
+    used.add(next)
+  })
+  return result
+}
 
 function CharacterPage() {
   const navigate = useNavigate()
@@ -27,6 +88,25 @@ function CharacterPage() {
 
   const [error, setError] =
     useState('')
+
+  // =========================================================
+  // 캐릭터별 목소리 (대본별로 브라우저 localStorage에 저장)
+  // =========================================================
+  const voiceStorageKey = `characterVoices:${scriptId}`
+
+  const [voiceList, setVoiceList] =
+    useState(FALLBACK_VOICES)
+
+  // 사용자가 직접 고른 목소리 (처음엔 저장값) — 고르지 않은 캐릭터는 아래 useMemo에서 자동 배정
+  const [voiceOverrides, setVoiceOverrides] =
+    useState(() => loadSavedVoices(`characterVoices:${scriptId}`))
+
+  const [previewing, setPreviewing] =
+    useState('')                                  // 미리듣기 중인 '캐릭터|목소리' (버튼 표시용)
+
+  const audioRef = useRef(null)                   // 재생 중인 미리듣기 Audio
+  const previewSeq = useRef(0)                    // 빠르게 여러 번 누를 때 마지막 요청만 재생하기 위한 번호
+
 
   // =========================================================
   // 감정 Badge 설정 (기존 스타일 그대로 유지)
@@ -139,7 +219,8 @@ function CharacterPage() {
         name,
         linesCount: charLines.length,
         emotions: charEmotions,
-        avatar: index % 2 === 0 ? '🎭' : '🎬'
+        avatar: index % 2 === 0 ? '🎭' : '🎬',
+        sampleText: (charLines[0]?.text || PREVIEW_FALLBACK_TEXT).slice(0, 150)   // 미리듣기는 그 캐릭터의 첫 대사
       }
     })
 
@@ -192,6 +273,86 @@ function CharacterPage() {
   }, [scriptId, location.state])
 
   // =========================================================
+  // 서버에서 목소리 목록 불러오기 (실패 시 FALLBACK_VOICES 유지)
+  // =========================================================
+  useEffect(() => {
+    fetch('http://localhost:8000/api/tts/voices')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('voices'))))
+      .then((list) => {
+        if (Array.isArray(list) && list.length > 0) setVoiceList(list)
+      })
+      .catch(() => {})
+  }, [])
+
+  // 페이지를 떠날 때 미리듣기 정지
+  useEffect(() => () => {
+    if (audioRef.current) audioRef.current.pause()
+  }, [])
+
+  // =========================================================
+  // 최종 캐릭터별 목소리 = 사용자 선택 + 나머지 자동 배정 (상태가 아니라 계산값)
+  // =========================================================
+  const characterVoices = useMemo(
+    () => assignDefaultVoices(characterList.map((c) => c.name), voiceOverrides, voiceList),
+    [characterList, voiceOverrides, voiceList]
+  )
+
+  // =========================================================
+  // 목소리 선택 + 미리듣기
+  // =========================================================
+  const stopPreview = () => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    setPreviewing('')
+  }
+
+  const playPreview = async (character, voiceId) => {
+    stopPreview()
+    const seq = ++previewSeq.current
+    const key = `${character.name}|${voiceId}`
+    setPreviewing(key)
+
+    try {
+      const res = await fetch('http://localhost:8000/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          voice: voiceId,
+          text: character.sampleText,
+          emotion: 'neutral'                      // 목소리 자체를 비교하도록 감정 없이 재생
+        })
+      })
+      if (!res.ok) throw new Error('preview')
+      const blob = await res.blob()
+      if (seq !== previewSeq.current) return      // 그사이 다른 목소리를 눌렀으면 이 결과는 버림
+
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audioRef.current = audio
+      audio.onended = () => {
+        URL.revokeObjectURL(url)
+        if (seq === previewSeq.current) setPreviewing('')
+      }
+      await audio.play()
+    } catch (err) {
+      console.warn('미리듣기 실패:', err)
+      if (seq === previewSeq.current) setPreviewing('')
+      alert('미리듣기를 재생하지 못했습니다. 서버 연결을 확인해 주세요.')
+    }
+  }
+
+  const handleVoiceClick = (event, character, voiceId) => {
+    event.stopPropagation()                       // 카드 클릭(역할 선택)으로 번지지 않게
+    // 현재 화면 배정 전체를 고정하고 이 캐릭터만 변경 → 다른 캐릭터의 자동 배정이 바뀌지 않음
+    const next = { ...characterVoices, [character.name]: voiceId }
+    setVoiceOverrides(next)
+    saveVoices(voiceStorageKey, next)
+    playPreview(character, voiceId)
+  }
+
+  // =========================================================
   // 선택된 캐릭터 & 모드
   // =========================================================
   const selectedCharacter =
@@ -211,11 +372,15 @@ function CharacterPage() {
       return
     }
 
+    stopPreview()
+    saveVoices(voiceStorageKey, characterVoices)   // 자동 배정분까지 저장 → 연습 화면 새로고침해도 같은 목소리
+
     navigate('/practice', {
       state: {
         scriptId: scriptId,
         scriptTitle: scriptTitle,
         chosenRole: selected, // 'LISTEN_ONLY' 또는 선택된 캐릭터 이름 전달
+        characterVoices,      // 캐릭터별 로봇 목소리 (PracticePage → /api/robot/speak)
         customLines: location.state?.customLines // 수정된 감정 데이터를 PracticePage로 계속 전달
       }
     })
@@ -573,6 +738,80 @@ function CharacterPage() {
                     {isSelected
                       ? '사용자가 직접 연기'
                       : '선택 시 사용자가 연기'}
+                  </div>
+
+                  {/* 목소리 선택: 누르면 선택 + 첫 대사로 미리듣기 */}
+                  <div
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}   // 버튼에서 Enter/Space가 카드 선택으로 번지지 않게
+                    style={{
+                      marginTop: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}
+                  >
+                    {['female', 'male'].map((gender) => (
+                      <div
+                        key={gender}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          flexWrap: 'wrap'
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: '34px',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            color: '#94A3B8'
+                          }}
+                        >
+                          {GENDER_LABEL[gender]}
+                        </span>
+
+                        {voiceList
+                          .filter((voice) => voice.gender === gender)
+                          .map((voice) => {
+                            const isChosen = characterVoices[character.name] === voice.id
+                            const isPlaying = previewing === `${character.name}|${voice.id}`
+                            const usedBy = Object.entries(characterVoices)
+                              .filter(([name, id]) => id === voice.id && name !== character.name)
+                              .map(([name]) => name)
+
+                            return (
+                              <button
+                                key={voice.id}
+                                type="button"
+                                onClick={(event) => handleVoiceClick(event, character, voice.id)}
+                                title={
+                                  usedBy.length > 0
+                                    ? `${usedBy.join(', ')}도 이 목소리를 사용 중`
+                                    : `${voice.id} 목소리로 미리듣기`
+                                }
+                                style={{
+                                  padding: '5px 10px',
+                                  borderRadius: '999px',
+                                  border: isChosen ? '1.5px solid #2563EB' : '1px solid #E2E8F0',
+                                  background: isChosen ? '#2563EB' : '#FFFFFF',
+                                  color: isChosen ? '#FFFFFF' : usedBy.length > 0 ? '#94A3B8' : '#334155',
+                                  fontSize: '12px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <span>{isPlaying ? '🔊' : '▶'}</span>
+                                <span>{voice.id}</span>
+                              </button>
+                            )
+                          })}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
