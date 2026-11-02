@@ -1,37 +1,14 @@
-CREATE DATABASE IF NOT EXISTS triplelingodb;
+-- ====================================================================
+-- Triplelingo 샘플 데이터 (테스트 계정 + 샘플 대본 9개)
+-- 실행 순서: triplelingo_schema_latest.sql → 이 파일
+-- 주의: scripts에는 UNIQUE 키가 없어 두 번 실행하면 대본이 중복 삽입됨 → 빈 DB에서 1회만 실행
+-- 대사(script_lines)·감정은 넣지 않음 → 웹에서 대본을 처음 열 때 서버가 자동 파싱·감정 분석 후 저장
+-- 출처: triplelingo_sql.sql(→ 설희 폴더의 triplelingo_sql_legacy.sql)의 데이터 부분
+-- ====================================================================
 USE triplelingodb;
--- DROP TABLE IF EXISTS users;
--- DROP TABLE IF EXISTS scripts;
 
--- 1. Create the user management platform profile framework table
-CREATE TABLE IF NOT EXISTS users (
-    user_id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(50),
-    nickname VARCHAR(50),
-    email VARCHAR(100) UNIQUE, -- Added UNIQUE constraint to match registration rules
-    password VARCHAR(255),
-    login_type VARCHAR(50),
-    profile_image VARCHAR(255),
-    status VARCHAR(50) DEFAULT 'ACTIVE', -- Added status tracker field to match main.py checks
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    social_provider VARCHAR(50),
-    social_id VARCHAR(100)
-);
-
--- 2. Create the practice scenario dialog scripts data logging table
-CREATE TABLE IF NOT EXISTS scripts (
-    script_id INT NOT NULL AUTO_INCREMENT,
-    user_id INT NOT NULL DEFAULT 1,
-    title VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (script_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
--- 3. Ingest sandbox user profiles rows
-INSERT INTO users 
+-- 1. 테스트 계정 (email UNIQUE → 재실행 시 중복은 무시)
+INSERT IGNORE INTO users 
 (name, nickname, email, password, login_type, status, profile_image, social_provider, social_id)
 VALUES
 ('홍길동', '길동이', 'hong@example.com', '12345678', 'LOCAL', 'ACTIVE', NULL, NULL, NULL),
@@ -263,39 +240,16 @@ Sarah: Okay. Maybe today is my lucky day after all.'
 );
 
 
--- 5. Run diagnostic execution validations
-SELECT * FROM users;
-SELECT script_id, title, CHAR_LENGTH(content) AS script_character_count FROM scripts;
+-- 2. 대본별 카테고리·난이도 지정 (UploadPage 탭: 일상회화 / 면접 / OPIc / 영화/드라마)
+UPDATE scripts SET category = '영화/드라마', level = '중급'
+ WHERE title LIKE '%Romeo%' OR title LIKE '%Earnest%' OR title LIKE '%Prada%';
+UPDATE scripts SET category = '일상회화', level = '초급' WHERE title = 'Emotion Practice Script';
+UPDATE scripts SET category = '면접', level = '중급' WHERE title LIKE '%Interview Practice%';
+UPDATE scripts SET category = 'OPIc', level = '중급' WHERE title LIKE '%OPIc%';
+UPDATE scripts SET category = '일상회화', level = '초급'
+ WHERE title LIKE '%Meeting a Friend%' OR title LIKE '%At a Cafe%';
+UPDATE scripts SET category = '일상회화', level = '중급' WHERE title LIKE '%Shopping for Clothes%';
 
-
-
-USE triplelingodb;
-
-CREATE TABLE IF NOT EXISTS practice_results (
-    result_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    script_id INT NOT NULL,
-    role_name VARCHAR(100),
-    
-
-    score INT NOT NULL,
-    accuracy_score INT,
-    fluency_score INT,
-    pronunciation_score INT,
-
-    practiced_lines INT DEFAULT 0,
-    practiced_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-DESC practice_results;
-
-
-
-
-USE triplelingodb;
-
-SELECT *
-FROM practice_results;
-
-DELETE FROM practice_results
-WHERE result_id = 1;
+-- 3. 확인
+SELECT user_id, name, email FROM users;
+SELECT script_id, title, category, level, CHAR_LENGTH(content) AS chars FROM scripts;
