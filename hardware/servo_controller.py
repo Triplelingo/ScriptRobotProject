@@ -9,9 +9,16 @@ servo_controller.py — 3축 서보 모션 엔진 (v2)
       최종 각도 = 중립각 + DIR × [ 스프링(자세 + 드리프트)      ← 감정별 '기본 자세'로 부드럽게 수렴
                                    + 제스처(키프레임 스플라인)   ← 대사 시작 시 1회성 감정 동작
                                    + 비트(음성 강세 동기 끄덕임)  ← TTS 음량 피크에 맞춘 작은 고갯짓
-                                   + 아이들(호흡·미세 흔들림)     ← 멈춰 있어도 살아 있어 보이게
-                                   + 떨림(fear 전용) ]
+                                   + 아이들(호흡·미세 흔들림)     ← 기본 비활성 (IDLE_GAIN = 0, 아래 참고)
+                                   + 떨림(fear 전용, PAN만) ]
                   → 속도 제한(°/s) → 가동 범위 클램프 → PCA9685 쓰기
+
+[하드웨어 제약 — 2026-11-03 실측, 되돌리지 말 것]
+  DS3120 데드밴드(3us ≈ 0.27°) 때문에 약 15°/s 이하의 '느린 이동'은 서보 내부에서
+  멈춤→툭이 반복되어 지지직 진동이 남 (유지 중에는 떨림 없음, 40°/s 일정속도는 깔끔).
+  → 3축 모두 이동 시 최소 속도 보장(TERM_SPEED), 1~2° 크기의 느린 미세동작은 제거.
+     표현은 '감정별 자세를 빠르게 바꾸고 유지' + 'PAN 비트 끄덕임' + '빠른 제스처·시선 이동'으로 한다.
+  → 새 동작을 넣을 때도 1회 이동량 3° 이상·속도 25°/s 이상을 유지할 것.
 
 [축 정의 — 기존 이름 유지]
   CH0 TILT : 고개 갸웃(좌우 기울기)   CH1 ROLL : 좌우 회전   CH2 PAN : 앞뒤 끄덕임
@@ -28,6 +35,7 @@ servo_controller.py — 3축 서보 모션 엔진 (v2)
 [단독 실행]
   python servo_controller.py calib   # 축 방향(DIR_*) 확인용: 각 축을 + 방향으로 천천히 이동
   python servo_controller.py demo    # 감정별 모션 데모 (가상 비트 사용)
+  python servo_controller.py still   # 떨림 진단: 중립 고정 명령 10초 (이때도 떨리면 전원·기구 문제)
   SERVO_SIM=1 python servo_controller.py demo   # 하드웨어 없이 로직만 실행
 """
 
@@ -48,15 +56,23 @@ import numpy as np   # 음성 포락선(envelope) 계산
 # =========================================================
 SIM = os.getenv("SERVO_SIM") == "1"
 
+# PWM 주파수: 높일수록 각도 분해능↑ (PCA9685 12bit = 주기/4096)
+#   50Hz → 1 count 0.44°  |  100Hz → 0.22°  |  200Hz → 0.11°
+#   50Hz에선 중간 속도(5~20°/s) 이동이 0/1 count 불규칙 계단으로 들어가 '지지직' 진동 발생.
+#   DS3120 판매 페이지엔 주파수 사양 없음(같은 계열 DS3235는 50~330Hz 명시) → 실측 확인 후 기본값 변경
+#   테스트: SERVO_PWM_HZ=100 python servo_controller.py demo joy
+PWM_HZ = int(os.getenv("SERVO_PWM_HZ", "50"))
+
 if not SIM:
     import board                                  # Blinka 핀 추상화
     import busio                                  # I²C 버스
     from adafruit_pca9685 import PCA9685          # PWM 드라이버
     from adafruit_motor import servo              # 각도 → 듀티 변환 래퍼
 
-    i2c = busio.I2C(board.SCL, board.SDA)         # SDA=GPIO2, SCL=GPIO3
+    # 400kHz: 루프 100Hz × 3채널 쓰기를 여유 있게 처리 (기본 100kHz는 틱당 I²C 시간이 김)
+    i2c = busio.I2C(board.SCL, board.SDA, frequency=400000)   # SDA=GPIO2, SCL=GPIO3
     pca = PCA9685(i2c)                            # 기본 주소 0x40
-    pca.frequency = 50                            # 서보 표준 50Hz
+    pca.frequency = PWM_HZ                        # ⚠ Servo 객체 생성 전에 설정해야 펄스폭→듀티 환산이 이 주파수 기준으로 됨
 
     # DS3120 실측 펄스폭 500~2500us (기본값 750~2250us면 각도 매핑 어긋남 — CLAUDE.md 참고)
     _DS3120_PULSE = {"min_pulse": 500, "max_pulse": 2500}
@@ -82,14 +98,42 @@ NEUTRAL_PAN  = 70
 #   pan  + : 고개를 든다(턱이 위로)        - : 숙인다
 #   roll + : 로봇 기준 왼쪽으로 돌린다
 #   tilt + : 로봇 기준 왼쪽으로 갸웃한다
-DIR = {"pan": +1, "roll": +1, "tilt": +1}
+DIR = {"pan": +1, "roll": +1, "tilt": -1}   # 2026-11-03 calib 결과 tilt 반전
 
 # 중립 대비 최대 편차(°) — 프레임 간섭·케이블 당김 방지용 소프트 리밋
 LIMIT = {"pan": 22.0, "roll": 35.0, "tilt": 18.0}
 
 MAX_SPEED  = 300.0   # 축당 최대 각속도(°/s). DS3120 무부하 약 400°/s@5V → 여유 두고 제한
-UPDATE_HZ  = 50      # 제어 루프 주기 (서보 PWM 주기와 동일, 이보다 빨라도 의미 없음)
-WRITE_EPS  = 0.15    # 이 값(°) 미만 변화는 I²C 쓰기 생략 → 버스 부하·미세 떨림(버징) 감소
+UPDATE_HZ  = min(PWM_HZ, 100)   # 제어 루프 주기: PWM 주기보다 빠를 필요는 없고, Python 스레드로는 100Hz가 현실적 상한
+DEG_PER_COUNT = (1e6 / PWM_HZ / 4096) / (2000 / 180)   # PCA9685 1 count가 몇 도인지 (DS3120 500~2500us/180° 기준)
+WRITE_EPS  = DEG_PER_COUNT * 0.9   # 1 count 바뀔 만큼 변하면 바로 씀 — 고정값(0.15°)이면 200Hz에서 1 count(0.11°)를 막아 분해능 이득이 사라짐
+
+# ── 정지 유지(히스테리시스) ──────────────────────────────────────
+# PCA9685 해상도 한계: 50Hz에서 1 count = 4.88us ≈ 0.44° (DS3120 500~2500us 기준).
+# 천천히 변하는 명령(아이들·드리프트 꼬리)은 0.44°씩 '툭툭' 끊겨 들어가고,
+# 토크 큰 디지털 서보가 무거운 머리를 매번 급정지시키며 진동(덜덜)이 생김.
+# → 명령이 느릴 때는 HOLD_BAND 안의 변화를 무시하고 현재 위치를 그대로 유지한다.
+HOLD_BAND  = 1.0     # 느린 구간에서 무시할 변화 폭(°). 키우면 정지 해제 순간 한 번에 그만큼 점프하므로 1.0 이하 유지
+HOLD_SPEED = 4.0     # 명령 각속도가 이보다 느리면(°/s) '정지 중'으로 간주
+# ── 종단 접근 ──────────────────────────────────────────────────
+# 스프링은 목표 근처에서 지수적으로 느려져 '기어가는' 꼬리가 생김 → 0.44° 계단이 띄엄띄엄 들어가
+# 중력 부하가 걸린 축(특히 TILT)이 매 계단마다 버벅이며 진동. 목표 TERM_BAND 이내에서는
+# 최소 TERM_SPEED로 직선 접근해 짧게 끝내고 정확히 멈춘다.
+# 이 거리(°) 이내부터 최소 속도 보장. inf = 이동 전 구간 (중력 부하 축: tilt·pan — 2026-11-03 저속 떨림 실측)
+TERM_BAND  = {"pan": float("inf"), "roll": float("inf"), "tilt": float("inf")}   # 3축 모두 저속 떨림 실측 (roll은 약하게)
+# 최소 속도(°/s). pan: 일정속도 테스트에서 15°/s가 깔끔했다면 20까지 낮춰 sadness의 '숙임'을 더 느리게 할 수 있음
+TERM_SPEED = {"pan": 35.0, "roll": 25.0, "tilt": 35.0}   # roll은 중력 부하가 없어 조금 낮게 — 떨리면 35까지
+
+# ── TILT 전용 제약 (2026-11-03 실측) ─────────────────────────────
+# TILT는 머리 무게를 옆으로 받치는 축 → 저속(약 15°/s 이하) 이동 시 DS3120 데드밴드(3us ≈ 0.27°) 때문에
+# '멈춤→툭' 반복이 생겨 지지직 진동. 일정속도 테스트: 5°/s 떨림, 40°/s 깔끔. 유지 중엔 떨림 없음.
+# → TILT는 '느리게 움직이지 않는다': 이동은 항상 TERM_SPEED["tilt"] 이상, 작은 변동(비트 변주·드리프트·제스처)은 제거.
+#   감정별 기울기(자세)만 빠르게 바꾸고 유지하는 방식으로 표현한다.
+ROLL_BEAT_SIDE = 0.0  # 비트에 섞이는 회전 변주 배율 — 1~2° bump는 전 구간이 저속이라 떨림 → 제거 (2026-11-03)
+TILT_DETAIL = 0.0    # 비트·제스처의 tilt 성분 배율 (0 = 제거). 1.0으로 되돌리면 이전 동작
+RELAX_W    = 6.0     # 대사 종료 후 중립 복귀 스프링 w (기존 3.0은 너무 느려 꼬리가 길었음)
+IDLE_GAIN  = 0.0     # 아이들 미세 흔들림 배율. 0.44° 분해능에선 1° 이하 흔들림이 떨림으로 보여 기본 비활성
+                     # (떨림 해결 확인 후 0.5부터 올려 보며 판단)
 BEAT_LEAD  = 0.08    # 비트 정점을 음량 피크보다 이만큼(초) 먼저 — 사람 고갯짓은 강세보다 약간 앞섬 + 기계 지연 보상
 BEAT_WIDTH = 0.28    # 비트 1회 길이(초)
 
@@ -111,8 +155,8 @@ SERVOS  = {"pan": servo_pan, "roll": servo_roll, "tilt": servo_tilt}
 PROFILES = {
     "neutral": dict(
         posture=(0, 0, 0), w=6.0, zeta=0.95,
-        beat_amp=3.0, beat_side=1.2, beat_rate=1.8,
-        drift=3.0, drift_iv=(1.8, 4.0), idle_amp=1.0, idle_speed=1.0, tremor=0.0,
+        beat_amp=4.0, beat_side=1.2, beat_rate=1.8,      # 2026-11-03: 3→4 (밋밋함 보완, 정점 약 45°/s)
+        drift=3.0, drift_iv=(1.2, 3.0), idle_amp=1.0, idle_speed=1.0, tremor=0.0,   # 2026-11-03: drift_iv (1.8,4.0)→(1.2,3.0) 시선 이동 더 자주
         onset=None,
     ),
     "joy": dict(  # 턱 살짝 들고 갸웃, 탄력 있는 잦은 끄덕임
@@ -121,35 +165,35 @@ PROFILES = {
         drift=4.0, drift_iv=(1.2, 3.0), idle_amp=1.2, idle_speed=1.3, tremor=0.0,
         onset=[(0.0, 0, 0, 0), (0.13, -7, 0, 2), (0.28, 2, 0, 3), (0.43, -5, 0, 3), (0.65, 0, 0, 0)],
     ),
-    "sadness": dict(  # 천천히 고개가 떨어지고 그대로 머묾, 느린 체념형 도리질
+    "sadness": dict(  # 고개를 떨구고(기울이고) 그대로 머묾 — 비트·도리질 없이 정적
         posture=(-11, 0, -6), w=2.5, zeta=1.0,
-        beat_amp=1.5, beat_side=0.6, beat_rate=1.0,
+        beat_amp=0.0, beat_side=0.6, beat_rate=1.0,   # 2026-11-03: 1.5° 비트는 PAN 저속 이동이 되어 떨림 → 비트 제거
         drift=1.5, drift_iv=(3.0, 6.0), idle_amp=0.6, idle_speed=0.5, tremor=0.0,
-        onset=[(0.0, 0, 0, 0), (0.9, 0, -4, 0), (1.8, 0, 3, 0), (2.6, 0, 0, 0)],
+        onset=None,   # 2026-11-03: 느린 도리질(약 8°/s, 1초) 제거 — 이 하드웨어에선 저속 떨림. 고개 떨굼(posture)으로 표현
     ),
     "anger": dict(  # 턱 당기고(노려봄) 정지에 가까운 긴장, 강세마다 짧고 날카롭게 찍음
         posture=(-5, 0, 0), w=13.0, zeta=0.85,
         beat_amp=6.0, beat_side=2.5, beat_rate=2.0,
         drift=1.0, drift_iv=(2.5, 5.0), idle_amp=0.3, idle_speed=0.8, tremor=0.0,
-        onset=[(0.0, 0, 0, 0), (0.08, -7, 0, 0), (0.35, -2, 0, 0), (0.6, 0, 0, 0)],
+        onset=[(0.0, 0, 0, 0), (0.08, -7, 0, 0), (0.26, 0, 0, 0)],   # 2026-11-03: 느린 꼬리(-2°→0) 제거 — PAN 저속 떨림
     ),
     "surprise": dict(  # 순간적으로 젖혀지고 들린 채 유지
         posture=(7, 0, 3), w=11.0, zeta=0.7,
         beat_amp=3.5, beat_side=1.5, beat_rate=2.0,
-        drift=2.0, drift_iv=(1.5, 3.0), idle_amp=0.8, idle_speed=1.2, tremor=0.0,
-        onset=[(0.0, 0, 0, 0), (0.09, 9, 0, 0), (0.5, 6, 0, 0), (1.0, 0, 0, 0)],
+        drift=3.0, drift_iv=(1.5, 3.0), idle_amp=0.8, idle_speed=1.2, tremor=0.0,   # 2026-11-03: drift 2→3 (작은 drift는 '툭' 경련처럼 보임)
+        onset=[(0.0, 0, 0, 0), (0.09, 9, 0, 0), (0.35, 0, 0, 0)],   # 2026-11-03: 9→6→0 느린 하강 제거, 유지는 posture
     ),
-    "fear": dict(  # 뒤로 움츠리며 고개를 돌림 + 미세 떨림 + 잦은 시선 이동
+    "fear": dict(  # 뒤로 움츠리며 고개를 돌림 + PAN 떨림 + 잦은 시선 이동
         posture=(5, -8, -3), w=10.0, zeta=0.8,
-        beat_amp=2.0, beat_side=1.0, beat_rate=1.5,
+        beat_amp=3.0, beat_side=1.0, beat_rate=1.5,      # 2026-11-03: 2→3 (2는 정점 약 22°/s로 떨림 경계)
         drift=3.0, drift_iv=(0.6, 1.6), idle_amp=0.8, idle_speed=1.5, tremor=0.7,
-        onset=[(0.0, 0, 0, 0), (0.1, 6, -6, 0), (0.6, 3, -4, 0), (1.0, 0, 0, 0)],
+        onset=[(0.0, 0, 0, 0), (0.1, 6, -6, 0), (0.35, 0, 0, 0)],   # 움찔 후 빠르게 복귀, 돌린 고개 유지는 posture
     ),
     "disgust": dict(  # 고개를 뒤로 빼며 외면
         posture=(4, 10, 5), w=4.0, zeta=1.0,
-        beat_amp=2.0, beat_side=1.0, beat_rate=1.2,
+        beat_amp=3.0, beat_side=1.0, beat_rate=1.2,      # 2026-11-03: 2→3 (떨림 경계 회피)
         drift=1.0, drift_iv=(2.5, 5.0), idle_amp=0.6, idle_speed=0.8, tremor=0.0,
-        onset=[(0.0, 0, 0, 0), (0.4, 3, 6, 2), (1.2, 1, 3, 1), (1.6, 0, 0, 0)],
+        onset=[(0.0, 0, 0, 0), (0.2, 0, 6, 0), (0.5, 0, 0, 0)],   # 고개 홱 돌리기 → 외면 유지는 posture (느린 꼬리 제거)
     ),
     "listen": dict(  # 사용자 발화 대기: 살짝 숙이고 갸웃 — 경청 자세. 마이크 잡음 줄이려 미세동작 최소화
         posture=(-2, 0, 6), w=4.0, zeta=1.0,
@@ -269,6 +313,7 @@ class MotionEngine:
         self._running = False
         self._thread = None
         self._last_written = {a: None for a in AXES}
+        self._prev_cmd = {a: None for a in AXES}          # 직전 틱 명령값 (명령 속도 추정용)
 
     # ---------- 상태 변경 (외부 스레드에서 호출) ----------
     def _set_profile_locked(self, emotion, intensity, onset, now):
@@ -317,7 +362,7 @@ class MotionEngine:
             now = now if now is not None else time.monotonic()
             self._drop_future_beats_locked(now)
             self._set_profile_locked("neutral", 1.0, onset=False, now=now)
-            self._w_override = (3.0, now + seconds)       # (스프링 w, 유효 종료 시각)
+            self._w_override = (RELAX_W, now + seconds)       # (스프링 w, 유효 종료 시각)
 
     # ---------- 1틱 계산 ----------
     def step(self, now, dt):
@@ -329,7 +374,7 @@ class MotionEngine:
                 amp = p["drift"]
                 self.drift = {"pan": self._rng.uniform(-0.5, 0.5)*amp,
                               "roll": self._rng.uniform(-1, 1)*amp,
-                              "tilt": self._rng.uniform(-0.6, 0.6)*amp}
+                              "tilt": self._rng.uniform(-0.6, 0.6)*amp*TILT_DETAIL}   # tilt 드리프트 제거 (저속 이동 방지)
                 self.next_drift = now + self._rng.uniform(*p["drift_iv"])
 
             # 2) 스프링: (자세 + 드리프트)로 2차 감쇠계 수렴 — 속도가 연속이라 출발·정지가 자연스러움
@@ -345,6 +390,15 @@ class MotionEngine:
                     acc = w*w*(target - self.x[a]) - 2*z*w*self.v[a]
                     self.v[a] += acc * h
                     self.x[a] += self.v[a] * h
+                # 종단 접근: 목표 근처인데 느리게 기어가고 있으면 최소 속도로 직선 접근 후 정확히 정지
+                err = target - self.x[a]
+                if abs(err) < TERM_BAND[a] and abs(self.v[a]) < TERM_SPEED[a]:
+                    stepv = TERM_SPEED[a] * dt
+                    if abs(err) <= stepv:
+                        self.x[a], self.v[a] = target, 0.0                # 도착 → 고정 (이후 쓰기 없음)
+                    else:
+                        self.x[a] += stepv if err > 0 else -stepv
+                        self.v[a] = 0.0
 
             off = dict(self.x)
 
@@ -355,7 +409,7 @@ class MotionEngine:
                     self.gesture = None
                 else:
                     for i, a in enumerate(AXES):
-                        off[a] += g[i] * k
+                        off[a] += g[i] * k * (TILT_DETAIL if a == "tilt" else 1.0)
 
             # 4) 비트 레이어: 현재 시각 ±창 안의 비트만 계산
             if self.speech_t0 is not None and self.beats:
@@ -367,11 +421,11 @@ class MotionEngine:
                 for tb, s, side_r, side_t in self.beats[lo:hi]:
                     b = _bump((ts - (tb - BEAT_WIDTH/2)) / BEAT_WIDTH)   # 정점이 tb에 오도록
                     off["pan"]  -= p["beat_amp"] * k * s * b             # 강세 = 아래로 끄덕
-                    off["roll"] += side_r * b
-                    off["tilt"] += side_t * b
+                    off["roll"] += side_r * b * ROLL_BEAT_SIDE
+                    off["tilt"] += side_t * b * TILT_DETAIL
 
             # 5) 아이들: 호흡(pan 0.22Hz) + 비정수배 사인 합 미세 흔들림
-            ia, isp = p["idle_amp"], p["idle_speed"]
+            ia, isp = p["idle_amp"] * IDLE_GAIN, p["idle_speed"]
             for a in AXES:
                 ph = self._phase[a]
                 n = (0.55*math.sin(2*math.pi*0.13*isp*now + ph[0])
@@ -383,7 +437,7 @@ class MotionEngine:
             # 6) 떨림 (fear) — 7Hz 근방, 축별 다른 주파수
             if p["tremor"]:
                 off["pan"]  += p["tremor"] * k * math.sin(2*math.pi*7.3*now)
-                off["roll"] += p["tremor"] * k * 0.7 * math.sin(2*math.pi*6.1*now + 1.0)
+                # roll 떨림(약 0.5°)은 데드밴드(0.27°)와 비슷한 크기라 표현이 아니라 버벅임이 됨 → 제거 (2026-11-03)
 
             # 7) 속도 제한 + 가동 범위 클램프 → 기어 보호, 급격한 점프 방지
             dmax = MAX_SPEED * dt
@@ -395,11 +449,15 @@ class MotionEngine:
             return {a: NEUTRAL[a] + DIR[a] * self.out[a] for a in AXES}
 
     # ---------- 하드웨어 출력 ----------
-    def _write(self, angles):
+    def _write(self, angles, dt=1.0 / UPDATE_HZ):
         for a in AXES:
             ang = max(0.0, min(180.0, angles[a]))
+            prev = self._prev_cmd[a]
+            speed = abs(ang - prev) / dt if prev is not None else 0.0   # 명령 각속도(°/s)
+            self._prev_cmd[a] = ang
+            band = WRITE_EPS if speed >= HOLD_SPEED else HOLD_BAND      # 느리면 넓은 띠로 정지 유지
             last = self._last_written[a]
-            if last is None or abs(ang - last) >= WRITE_EPS:   # 미세 변화는 쓰지 않음
+            if last is None or abs(ang - last) >= band:
                 SERVOS[a].angle = ang
                 self._last_written[a] = ang
 
@@ -409,7 +467,8 @@ class MotionEngine:
         prev = nxt
         while self._running:
             now = time.monotonic()
-            self._write(self.step(now, min(now - prev, 0.05) or dt))  # 실제 경과시간으로 적분 (지터 보정)
+            step_dt = min(now - prev, 0.05) or dt             # 실제 경과시간으로 적분 (지터 보정)
+            self._write(self.step(now, step_dt), step_dt)
             prev = now
             nxt += dt
             slack = nxt - time.monotonic()
@@ -548,21 +607,52 @@ def _calib():
         time.sleep(1.5)
 
 
-def _demo():
-    """가상 비트(0.45초 간격)로 감정별 3초씩 재생"""
+def _demo(args=()):
+    """
+    감정별 모션 데모 (가상 비트 0.45초 간격, 감정마다 3초)
+      python servo_controller.py demo                 # 전체 감정
+      python servo_controller.py demo joy             # 한 감정만
+      python servo_controller.py demo joy --no-beat   # 레이어 끄기: --no-beat / --no-gesture / --no-drift / --no-tremor
+    떨림 원인 찾기: 감정 → 레이어 순으로 하나씩 꺼 가며 어느 조합에서 사라지는지 확인
+    """
+    emos = [x for x in args if not x.startswith("--")] or \
+           ["neutral", "joy", "anger", "sadness", "surprise", "fear", "disgust"]
+    flags = {x for x in args if x.startswith("--")}
     _ensure_started()
-    for emo in ["neutral", "joy", "anger", "sadness", "surprise", "fear", "disgust"]:
-        print(f"[demo] {emo}")
-        _engine.set_mood(emo)
-        _engine.start_speech([(0.3 + 0.45*i, 0.8) for i in range(6)], time.monotonic())
+    for emo in emos:
+        base = PROFILES.get(emo, PROFILES["neutral"])
+        prof = dict(base)                                 # 원본 프로파일은 건드리지 않고 복사본만 수정
+        if "--no-gesture" in flags: prof["onset"] = None
+        if "--no-drift" in flags:   prof["drift"] = 0.0
+        if "--no-tremor" in flags:  prof["tremor"] = 0.0
+        PROFILES["_demo"] = prof
+        print(f"[demo] {emo}  (끈 레이어: {', '.join(sorted(flags)) or '없음'})")
+        _engine.set_mood("_demo")
+        if "--no-beat" not in flags:
+            _engine.start_speech([(0.3 + 0.45*i, 0.8) for i in range(6)], time.monotonic())
         time.sleep(3.0)
         _engine.relax()
         time.sleep(1.5)
 
 
+def _still(seconds=10):
+    """진단용: 중립에서 완전 정지 (아이들·드리프트 0, 명령값 고정).
+    이 상태에서도 떨리면 소프트웨어가 아니라 전원·기구 문제."""
+    PROFILES["_still"] = dict(PROFILES["neutral"], drift=0.0, idle_amp=0.0)
+    _ensure_started()
+    _engine.set_mood("_still", onset=False)
+    print(f"[still] {seconds}초간 고정 명령 — 이때도 떨리는지 관찰")
+    time.sleep(seconds)
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "demo"
     try:
-        _calib() if mode == "calib" else _demo()
+        if mode == "calib":
+            _calib()
+        elif mode == "still":
+            _still()
+        else:
+            _demo(sys.argv[2:])
     finally:
         shutdown()
