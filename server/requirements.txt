@@ -1,8 +1,29 @@
+# ====================================================================
+# Triplelingo 백엔드(server/) 의존성
+# 설치: pip install -r requirements.txt   (server/.venv 활성화 후)
+# 별도 설치 필요(파이썬 패키지 아님): ffmpeg(PATH 등록), MySQL 8.0, Ollama + mistral 모델
+# ====================================================================
+
+# --- 웹 서버 / API ---
 fastapi==0.135.3
 uvicorn==0.43.0
-websockets==16.0
-# PyMySQL==1.1.2
-python-dotenv
-transformers
+websockets==16.0              # RPi5 ↔ 서버 WebSocket
+python-multipart              # Form/File 업로드(대본 업로드, 녹음 평가) 처리에 필수
+python-dotenv                 # .env의 Azure 키 로드
+requests                      # Ollama 로컬 LLM 호출
+
+# --- DB ---
+SQLAlchemy
+PyMySQL==1.1.2                # SQLAlchemy MySQL 드라이버 (mysql+pymysql://)
+
+# --- 음성 (TTS·STT·발음 평가) ---
+azure-cognitiveservices-speech
+pydub                         # 녹음(webm) → 16kHz WAV 변환 (내부적으로 ffmpeg 사용)
+
+# --- AI 감정 분류 ---
+transformers                  # j-hartmann/emotion-english-distilroberta-base
 torch
-# sentence-transformers
+
+# --- 테스트 API(/api/test/speak) 전용 ---
+numpy
+scipy
