@@ -2,8 +2,8 @@
 # ─────────────────────────────────────────────────────────────
 # 서버(FastAPI)와 WebSocket으로 연결해 로봇 동작을 수행한다.
 #   speak        : TTS 음성 재생 + 서보 고갯짓 + LCD viseme 립싱크
-#   standby      : 대기 상태로 복귀 (녹음 레벨 LED 모니터링 시작)
-#   end_recording: 녹음 종료 (LED 끄기)
+#   standby      : 사용자 차례 시작 (LCD 발화 파형 표시)
+#   end_recording: 녹음 종료 (파형 끄고 다문 입 복귀)
 #   set_volume   : 스피커 볼륨 변경 (웹 슬라이더)
 #   end_session  : 세션 종료 (서보·입 모양 초기화)
 # 실행: python -u ws_client.py   (핫스팟 환경: SERVER_HOST=192.168.137.1 python -u ws_client.py)
@@ -19,7 +19,6 @@ import websockets
 import subprocess
 import tempfile
 import io
-import lgpio
 import sounddevice as sd
 import numpy as np
 import threading
@@ -28,7 +27,7 @@ import re
 import time      # aplay 시작 시각(t0) 기록용 — 립싱크 기준점
 import wave      # WAV 헤더에서 재생 길이 계산, 볼륨 증폭
 
-stop_event = threading.Event()    # LED 모니터링(녹음 레벨 표시) 스레드 중단용
+stop_event = threading.Event()    # 발화 파형(monitor_mic) 스레드 중단용
 speak_stop = threading.Event()    # 입 애니메이션 중단용 (stop_event와 분리)
 
 # ─────────────────────────────────────────────────────────────
@@ -110,22 +109,6 @@ def load_saved_volume():
 
 
 # ─────────────────────────────────────────────────────────────
-# 녹음 레벨 LED (최종 하드웨어에서는 미장착 — 코드만 유지)
-# ─────────────────────────────────────────────────────────────
-LED_PINS = [13, 6, 26]
-h = lgpio.gpiochip_open(0)
-for pin in LED_PINS:
-    lgpio.gpio_claim_output(h, pin)
-    lgpio.gpio_write(h, pin, 0)
-
-
-def set_leds(count):
-    """마이크 입력 크기에 따라 LED를 count개 켠다."""
-    for i, pin in enumerate(LED_PINS):
-        lgpio.gpio_write(h, pin, 1 if i < count else 0)
-
-
-# ─────────────────────────────────────────────────────────────
 # 서버 주소 — 환경변수로 덮어쓸 수 있음 (코드 수정 없이 네트워크 전환)
 # ─────────────────────────────────────────────────────────────
 SERVER_HOST = os.getenv("SERVER_HOST", "192.168.0.102")    # 기본: 노트북 서버 주소 / 핫스팟 환경에서는 192.168.137.1
@@ -168,7 +151,6 @@ async def handle_messages(ws):
             await on_standby(ws)
         elif msg_type == "end_recording":
             await asyncio.to_thread(stop_wave)    # 파형 종료 → 다문 입으로 복귀
-            set_leds(0)
             print("[RPi5] 🔴 녹음 종료 — 파형 종료")
         elif msg_type == "set_volume":
             v = apply_volume(msg.get("volume", 100))
@@ -193,7 +175,6 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
     """TTS 음성 재생 + 감정별 서보 동작 + LCD 립싱크를 동시에 수행"""
     print(f"[RPi5] 🔊 speak 처리 — emotion={emotion}, {len(audio_bytes):,} bytes, viseme {len(visemes or [])}개")
     await asyncio.to_thread(stop_wave)    # 파형이 켜져 있으면 끄고 LCD를 입 모양에 넘김
-    set_leds(0)
     speak_stop.clear()   # 이전 중단 신호 초기화
 
     # WAV 헤더 기반 재생 시간 계산
@@ -244,13 +225,13 @@ async def on_speak(ws, audio_bytes: bytes, emotion: str, visemes=None):
 async def on_standby(ws):
     print("[RPi5] ⏳ standby — 사용자 발화 파형 표시 시작")
     reset()
-    start_wave()          # 기존 threading.Thread(target=monitor_led ...) 줄을 이걸로 교체
+    start_wave()          # LCD에 사용자 발화 파형 표시 시작
 
 
 # ─────────────────────────────────────────────────────────────
 # 사용자 발화 파형: standby~end_recording 동안 마이크 소리 크기를 LCD에 막대로 표시
 # ─────────────────────────────────────────────────────────────
-MIC_SAMPLERATE = 16000     # 기존 LED 모니터링과 같은 값 (에러가 나면 22050으로 변경)
+MIC_SAMPLERATE = 16000     # USB 마이크 입력 샘플레이트 (Invalid sample rate 에러가 나면 22050으로 변경)
 WAVE_FPS = 15              # 화면 갱신 목표 (LCD 한계가 약 13fps라 그 이상은 의미 없음)
 NOISE_MARGIN_DB = 3.0      # 주변 소음보다 이만큼 커지면 막대가 올라가기 시작 (조용할 때 흔들리면 키우기)
 WAVE_RANGE_DB = 24.0       # 무음 기준 + 이 값(dB)에서 막대 최대 (크게 말해도 낮으면 줄이기)
@@ -359,7 +340,6 @@ async def on_end_session():
     print("[RPi5] 🏁 세션 종료")
     await asyncio.to_thread(stop_wave)    # 파형이 켜져 있으면 끄고 LCD를 입 모양에 넘김
     speak_stop.set()   # 진행 중인 입 애니메이션 중단
-    set_leds(0)
     reset()
     close_mouth()
 
