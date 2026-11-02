@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from transformers import pipeline   # 업로드 대본 감정 자동 분류용
 
 import azure.cognitiveservices.speech as speechsdk
 from pydub import AudioSegment
@@ -29,6 +30,80 @@ load_dotenv()
 os.makedirs("recordings", exist_ok=True)
 
 app = FastAPI()
+
+# ====================================================================
+# 0. SCRIPT PARSING & EMOTION CLASSIFICATION HELPERS
+# ====================================================================
+def parse_script_content(content: str):
+    """
+    '캐릭터: 대사' 형식의 대본 텍스트를 줄 단위로 파싱.
+    반환: [{"line_order", "character_name", "dialogue"}, ...]
+    """
+    parsed_lines = []
+
+    # 줄바꿈 통일 (Windows CRLF / 구형 Mac CR 대응)
+    raw_lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    line_order = 1
+
+    for raw_line in raw_lines:
+        line = raw_line.strip()
+        if not line or ":" not in line:      # 빈 줄·지문(콜론 없음)은 건너뜀
+            continue
+
+        character_name, dialogue = line.split(":", 1)   # 대사 안의 콜론은 보존
+        character_name = character_name.strip()
+        dialogue = dialogue.strip()
+
+        if not character_name or not dialogue:
+            continue
+
+        parsed_lines.append({
+            "line_order": line_order,
+            "character_name": character_name,
+            "dialogue": dialogue
+        })
+        line_order += 1
+
+    return parsed_lines
+
+
+emotion_classifier = None   # 첫 호출 시 1회만 로드 (서버 기동 시간 단축)
+
+
+def _get_emotion_classifier():
+    """RoBERTa 감정 분류 모델 지연 로딩"""
+    global emotion_classifier
+    if emotion_classifier is None:
+        print("[AI] 감정 분석 모델 로딩 중...")
+        emotion_classifier = pipeline(
+            "text-classification",
+            model="j-hartmann/emotion-english-distilroberta-base",
+            device=-1                        # CPU 추론
+        )
+        print("[AI] 감정 분석 모델 로딩 완료!")
+    return emotion_classifier
+
+
+def classify_script_lines(parsed_lines, window: int = 3):
+    """
+    대사 목록 전체를 문맥(앞 window줄) 포함해 감정 분류.
+    parse_router.classify_with_context와 같은 방식이지만,
+    웹 화면·DB에서 7개 감정을 그대로 쓰므로 fear/disgust를 다른 감정으로 합치지 않음.
+    동기 함수 → 호출부에서 asyncio.to_thread로 실행해 이벤트 루프(WebSocket ping) 차단 방지.
+    """
+    classifier = _get_emotion_classifier()
+    emotions = []
+    for idx, line in enumerate(parsed_lines):
+        # 앞 window줄을 '인물: 대사' 형태로 묶어 문맥으로 사용
+        context = " [SEP] ".join(
+            f"{p['character_name']}: {p['dialogue']}"
+            for p in parsed_lines[max(0, idx - window):idx]
+        )
+        text_in = f"{context} [SEP] {line['dialogue']}" if context else line["dialogue"]
+        result = classifier(text_in, truncation=True)[0]   # 512토큰 초과 시 잘라서 처리
+        emotions.append(result["label"].lower())
+    return emotions
+
 
 
 #ws_router.py import
@@ -109,14 +184,14 @@ async def update_user_profile(req: UpdateProfileRequest):
 
 
 # ====================================================================
-# 1. LOCAL ADMINISTRATIVE SYSTEM LOGISTICS OLLAMA PIPELINE
+# 1. LOCAL ADMINISTRATIVE SYSTEM LOGISTICS OLLAMA PIPELINE (FAST)
 # ====================================================================
 def get_feedback_from_ollama(expected, user_text):
     prompt = f"""
 Expected Script Line: "{expected}"
 User Utterance Captured: "{user_text}"
 
-Analyze the phrase. Find mistakes and provide clear feedback on pronunciation anomalies, missing or skipped words, and natural flow/fluency. Keep it concise.
+Analyze the phrase briefly. State any missed words or pronunciation anomalies in 1 concise sentence.
 """
     try:
         response = requests.post(
@@ -124,15 +199,18 @@ Analyze the phrase. Find mistakes and provide clear feedback on pronunciation an
             json={
                 "model": "mistral",
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "num_predict": 45,
+                    "temperature": 0.3
+                }
             },
-            timeout=60
+            timeout=8
         )
-        return response.json().get("response", "")
+        return response.json().get("response", "").strip()
     except Exception as e:
         print(f"Ollama Connection Error: {e}")
-        return "AI detailed linguistic breakdown is temporarily unavailable. Check if Ollama is running."
-
+        return "Review difficult consonant transitions and maintain smooth sentence flow."
 
 # ====================================================================
 # 2. HOMEPAGE & USER MANAGEMENT ENDPOINTS
@@ -275,6 +353,114 @@ def login_user(data: dict = Body(...)):
 # ====================================================================
 # 4. CUSTOM SCENARIO PARSING & SELECTION DATA-LOGS
 # ====================================================================
+@app.delete("/scripts/{script_id}")
+
+@app.post("/scripts/upload")
+async def upload_script(
+    user_id: int = Form(...),
+    title: str = Form(...),
+    category: str = Form(...),
+    level: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
+        filename = file.filename or ""
+        if "." not in filename:
+            raise HTTPException(status_code=400, detail="파일 확장자를 확인할 수 없습니다.")
+
+        extension = filename.rsplit(".", 1)[1].lower()
+        if extension not in ["txt"]:
+            raise HTTPException(status_code=400, detail="현재는 TXT 파일만 업로드할 수 있습니다.")
+
+        file_bytes = await file.read()
+        try:
+            content = file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                content = file_bytes.decode("cp949")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="TXT 파일의 문자 인코딩을 읽을 수 없습니다.")
+
+        content = content.strip()
+        if not content:
+            raise HTTPException(status_code=400, detail="대본 파일이 비어 있습니다.")
+
+        parsed_lines = parse_script_content(content)
+        if not parsed_lines:
+            raise HTTPException(status_code=400, detail="'인물: 대사' 형식의 대사를 찾을 수 없습니다.")
+
+        # 감정 분류는 수 초 걸리므로 별도 스레드에서 실행 → 그동안 로봇 WebSocket·다른 요청 정상 처리
+        emotions = await asyncio.to_thread(classify_script_lines, parsed_lines)
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("""
+                    INSERT INTO scripts (user_id, title, content, category, level)
+                    VALUES (:user_id, :title, :content, :category, :level)
+                """),
+                {
+                    "user_id": user_id,
+                    "title": title,
+                    "content": content,
+                    "category": category,
+                    "level": level
+                }
+            )
+            script_id = result.lastrowid
+
+            for line, emotion in zip(parsed_lines, emotions):   # 대사와 분류 결과를 짝지어 저장
+                conn.execute(
+                    text("""
+                        INSERT INTO script_lines (
+                            script_id, line_order, character_name, dialogue, emotion
+                        )
+                        VALUES (
+                            :script_id, :line_order, :character_name, :dialogue, :emotion
+                        )
+                    """),
+                    {
+                        "script_id": script_id,
+                        "line_order": line["line_order"],
+                        "character_name": line["character_name"],
+                        "dialogue": line["dialogue"],
+                        "emotion": emotion
+                    }
+                )
+
+        raw_lines = [
+            line.strip()
+            for line in content.replace("\r", "").split("\n")
+            if line.strip()
+        ]
+        dialog_lines = [line for line in raw_lines if ":" in line]
+        characters = set()
+
+        for line in dialog_lines:
+            character = line.split(":", 1)[0].strip()
+            if character:
+                characters.add(character)
+
+        return {
+            "success": True,
+            "message": "대본 업로드 성공",
+            "script": {
+                "script_id": script_id,
+                "title": title,
+                "category": category,
+                "level": level,
+                "filename": filename,
+                "character_count": len(characters),
+                "characters": list(characters),
+                "line_count": len(dialog_lines)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Script Upload Error] {e}")
+        raise HTTPException(status_code=500, detail=f"대본 업로드 실패: {str(e)}")
+
+
 @app.post("/scripts")
 def create_script(data: dict = Body(...)):
     with engine.connect() as conn:
@@ -332,108 +518,126 @@ async def get_all_scripts_api():
 
 @app.get("/api/scripts/{script_id}")
 async def get_parsed_script(script_id: int):
+    # 1) 대본 원문 + 저장된 대사 조회
     with engine.connect() as conn:
         script = conn.execute(
-            text("SELECT script_id, title, content, created_at FROM scripts WHERE script_id = :script_id"),
+            text("""
+                SELECT script_id, title, content, created_at
+                FROM scripts
+                WHERE script_id = :script_id
+            """),
             {"script_id": script_id}
-        ).fetchone()
+        ).mappings().first()
 
         if not script:
             raise HTTPException(status_code=404, detail="대본이 없습니다.")
 
-        raw_content = script.content
-        raw_lines = [line.strip() for line in raw_content.replace('\r', '').split('\n') if line.strip()]
+        db_lines = conn.execute(
+            text("""
+                SELECT line_id, line_order, character_name, dialogue, emotion
+                FROM script_lines
+                WHERE script_id = :script_id
+                ORDER BY line_order ASC
+            """),
+            {"script_id": script_id}
+        ).mappings().all()
 
-        if "Meeting a Friend" in script.title:
-            emotion_map = [
-                "sadness", "surprise", "sadness", "surprise", "sadness", 
-                "surprise", "fear", "joy", "anger", "neutral", 
-                "anger", "sadness", "anger", "fear", "sadness", 
-                "surprise", "sadness", "joy", "joy", "joy", 
-                "joy", "joy", "joy"
-            ]
-        elif "At a Cafe" in script.title:
-            emotion_map = [
-                "joy", "surprise", "surprise", "disgust", "sadness", 
-                "sadness", "sadness", "neutral", "joy"
-            ]
-        elif "Shopping for Clothes" in script.title:
-            emotion_map = [
-                "joy", "joy", "joy", "neutral", "joy", 
-                "joy", "neutral", "neutral", "surprise", "neutral", 
-                "surprise", "surprise", "sadness", "neutral", "neutral", 
-                "joy", "surprise", "neutral", "sadness", "neutral", 
-                "sadness", "neutral", "sadness", "neutral", "joy", 
-                "neutral", "neutral", "neutral", "neutral", "neutral", 
-                "surprise", "surprise", "surprise", "joy", "surprise", 
-                "joy", "joy", "joy"
-            ]
-        elif "Job Interview" in script.title:
-            emotion_map = [
-                "joy", "joy", "neutral", "joy", "neutral", "joy", 
-                "neutral", "joy", "neutral", "neutral", "neutral", "neutral", 
-                "neutral", "joy", "neutral", "neutral", "neutral", "joy", 
-                "neutral", "joy", "neutral", "joy", "neutral", "joy", 
-                "joy", "joy", "joy", "joy"
-            ]
-        elif "Topic" in script.title or "OPIc" in script.title:
-            emotion_map = [
-                "neutral", "joy", "neutral", "joy", "neutral", "joy", 
-                "neutral", "neutral", "neutral", "joy", "neutral", "joy", 
-                "neutral", "joy", "neutral", "joy", "neutral", "neutral", 
-                "neutral", "joy", "neutral", "joy", "neutral", "joy", 
-                "neutral", "joy", "neutral", "joy"
-            ]
-        elif "Prada" in script.title:
-            emotion_map = [
-                "anger", "fear", "anger", "neutral", 
-                "fear", "anger", "disgust", "fear", 
-                "neutral", "fear", "disgust", "neutral"
-            ]
-        elif "Emotion" in script.title:
-            emotion_map = [
-                "joy", "joy", "fear", "fear", "surprise", "surprise", 
-                "anger", "anger", "sadness", "sadness", "disgust", "disgust", 
-                "neutral", "neutral"
-            ]
-        elif "Romeo" in script.title:
-            emotion_map = ["joy", "joy", "joy", "sadness", "joy"]
-        elif "Earnest" in script.title:
-            emotion_map = ["joy", "neutral", "anger", "disgust"]
-        else:
-            emotion_map = ["neutral"] * len(raw_lines)
+    # 2) script_lines가 비어 있으면(업로드 API 이전에 넣은 대본) 원문을 파싱·감정 분류해 저장
+    if not db_lines and script["content"]:
+        print(f"[Auto-Parse] script {script_id}: script_lines 없음 → content 파싱")
+        raw_parsed = parse_script_content(script["content"])
+        emotions = await asyncio.to_thread(classify_script_lines, raw_parsed)   # 이벤트 루프 차단 방지
 
-        robot_characters = [
-            "Alex", "Romeo", "Jack", "Miranda", 
-            "Interviewer", "Examiner", "Jake", "Staff", "Friend"
-        ]
+        with engine.begin() as save_conn:       # 정상 종료 시 자동 commit
+            for line, emotion in zip(raw_parsed, emotions):
+                save_conn.execute(
+                    text("""
+                        INSERT INTO script_lines (script_id, line_order, character_name, dialogue, emotion)
+                        VALUES (:script_id, :line_order, :character_name, :dialogue, :emotion)
+                    """),
+                    {
+                        "script_id": script_id,
+                        "line_order": line["line_order"],
+                        "character_name": line["character_name"],
+                        "dialogue": line["dialogue"],
+                        "emotion": emotion
+                    }
+                )
 
-        parsed_lines = []
-        dialog_line_index = 0
+        # 새 연결로 재조회 — 기존 연결은 REPEATABLE READ 스냅샷 때문에 방금 넣은 행이 안 보일 수 있음
+        with engine.connect() as conn:
+            db_lines = conn.execute(
+                text("""
+                    SELECT line_id, line_order, character_name, dialogue, emotion
+                    FROM script_lines
+                    WHERE script_id = :script_id
+                    ORDER BY line_order ASC
+                """),
+                {"script_id": script_id}
+            ).mappings().all()
 
-        for line in raw_lines:
-            if ":" in line:
-                character, text_content = line.split(":", 1)
-                character = character.strip()
-                text_content = text_content.strip()
+    robot_characters = [
+        "Alex", "Romeo", "Jack", "Miranda", "Interviewer",
+        "Examiner", "Jake", "Staff", "Friend"
+    ]
 
-                inferred_emotion = emotion_map[dialog_line_index] if dialog_line_index < len(emotion_map) else "neutral"
+    # 3) 프론트 형식으로 변환 (id: 화면 순번, line_id: DB PK → 감정 수정 PATCH에 사용)
+    parsed_lines = []
+    for index, line in enumerate(db_lines):
+        character = line["character_name"]
+        parsed_lines.append({
+            "id": index + 1,
+            "line_id": line["line_id"],
+            "character": character,
+            "text": line["dialogue"],
+            "scores": None,
+            "emotion": line["emotion"] or "neutral",
+            "avatar": "🤖" if character in robot_characters else "나"
+        })
 
-                parsed_lines.append({
-                    "id": dialog_line_index + 1,
-                    "character": character,
-                    "text": text_content,
-                    "scores": None,
-                    "emotion": inferred_emotion,
-                    "avatar": "🤖" if character in robot_characters else "나"
-                })
-                dialog_line_index += 1
+    return {
+        "title": script["title"],
+        "lines": parsed_lines
+    }
 
-        return {
-            "title": script.title,
-            "lines": parsed_lines
-        }
+@app.patch("/api/scripts/{script_id}/lines/{line_id}/emotion")
+async def update_script_line_emotion(
+    script_id: int,
+    line_id: int,
+    payload: dict
+):
+    emotion = payload.get("emotion")
+    allowed_emotions = {
+        "anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"
+    }
 
+    if emotion not in allowed_emotions:
+        raise HTTPException(status_code=400, detail="올바르지 않은 감정입니다.")
+
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("""
+                UPDATE script_lines
+                SET emotion = :emotion
+                WHERE script_id = :script_id
+                  AND line_id = :line_id
+            """),
+            {
+                "emotion": emotion,
+                "script_id": script_id,
+                "line_id": line_id
+            }
+        )
+
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="해당 대사를 찾을 수 없습니다.")
+
+    return {
+        "success": True,
+        "script_id": script_id,
+        "line_id": line_id,
+        "emotion": emotion
+    }
 
 # ====================================================================
 # 5. NATURAL EMOTIONAL TEXT-TO-SPEECH (BROWSER BINARY AUDIO RETURN)
@@ -525,38 +729,40 @@ async def robot_speak(
 
 
 # ====================================================================
-# 6. AUDIO TRANSCODING & PRONUNCIATION COGNITIVE CORE
+# 6. AUDIO TRANSCODING & PRONUNCIATION COGNITIVE CORE (RAM STREAMING)
 # ====================================================================
 @app.post("/api/evaluate")
 async def evaluate_audio(
     reference_text: str = Form(...), 
     file: UploadFile = File(...)
 ):
-    temp_upload = "upload_raw.webm"
-    temp_filename = "temp_user_voice.wav"
-    
-    audio_bytes = await file.read()
-    with open(temp_upload, "wb") as buffer:
-        buffer.write(audio_bytes)
-
     try:
-        audio = AudioSegment.from_file(temp_upload)
+        audio_bytes = await file.read()
+
+        # ⚡ 1. In-Memory Transcoding (Bypasses slow disk writes)
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-        audio.export(temp_filename, format="wav")
         
-        if os.path.exists(temp_upload): 
-            os.remove(temp_upload)
+        wav_io = io.BytesIO()
+        audio.export(wav_io, format="wav")
+        wav_bytes = wav_io.getvalue()
+
+        # ⚡ 2. Direct PushAudioInputStream to Azure
+        push_stream = speechsdk.audio.PushAudioInputStream()
+        push_stream.write(wav_bytes)
+        push_stream.close()
 
         speech_config = speechsdk.SpeechConfig(
             subscription=os.getenv("AZURE_SPEECH_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION")
         )
-        audio_config = speechsdk.AudioConfig(filename=temp_filename)
-        
+        audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
+
+        # ⚡ 3. Granularity.Word evaluates significantly faster than Phoneme
         pron_config = speechsdk.PronunciationAssessmentConfig(
             reference_text=reference_text,
             grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
-            granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme
+            granularity=speechsdk.PronunciationAssessmentGranularity.Word
         )
 
         recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
@@ -565,17 +771,21 @@ async def evaluate_audio(
 
         del recognizer
 
-        # Save audio file to recordings/ folder
+        # Save audio file to recordings/ folder for playback
         audio_unique_name = f"{uuid.uuid4()}.wav"
         audio_filepath = os.path.join("recordings", audio_unique_name)
-        shutil.copy(temp_filename, audio_filepath)
-
-        if os.path.exists(temp_filename): 
-            os.remove(temp_filename)
+        with open(audio_filepath, "wb") as f:
+            f.write(wav_bytes)
 
         if result.reason == speechsdk.ResultReason.RecognizedSpeech:
             pron_result = speechsdk.PronunciationAssessmentResult(result)
-            feedback = get_feedback_from_ollama(reference_text, result.text)
+
+            # 🌟 Conditional triggering: Skip slow Ollama LLM if fluent
+            is_fluent = (pron_result.pronunciation_score >= 80 and pron_result.fluency_score >= 80)
+            if is_fluent:
+                feedback = "Great pronunciation and natural pacing! Keep up the momentum."
+            else:
+                feedback = get_feedback_from_ollama(reference_text, result.text)
 
             word_details = []
             for word in pron_result.words:
@@ -603,10 +813,7 @@ async def evaluate_audio(
         }
 
     except Exception as err:
-        if os.path.exists(temp_upload): os.remove(temp_upload)
-        if os.path.exists(temp_filename): os.remove(temp_filename)
         return {"status": "error", "message": f"Internal Server Error: {str(err)}"}
-
 
 # ====================================================================
 # 7. PRACTICE RESULTS PERSISTENCE (USED BY RESULTPAGE)
@@ -853,14 +1060,14 @@ async def save_script_lines(script_id: int, data: dict = Body(...)):
             conn.execute(
                 text("""
                     INSERT INTO script_lines 
-                    (script_id, line_order, character_name, text, emotion)
-                    VALUES (:script_id, :line_order, :character_name, :text, :emotion)
+                    (script_id, line_order, character_name, dialogue, emotion)
+                    VALUES (:script_id, :line_order, :character_name, :dialogue, :emotion)
                 """),
                 {
                     "script_id": script_id,
                     "line_order": line["id"],
                     "character_name": line["character"],
-                    "text": line["text"],
+                    "dialogue": line["text"],
                     "emotion": line["emotion"]
                 }
             )
@@ -886,7 +1093,7 @@ async def get_script_lines(script_id: int):
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT line_id, line_order, character_name, text, emotion
+                SELECT line_id, line_order, character_name, dialogue, emotion
                 FROM script_lines
                 WHERE script_id = :script_id
                 ORDER BY line_order
@@ -899,7 +1106,7 @@ async def get_script_lines(script_id: int):
                 "line_id": row.line_id,
                 "id": row.line_order,
                 "character": row.character_name,
-                "text": row.text,
+                "text": row.dialogue,
                 "emotion": row.emotion
             })
         return lines

@@ -1199,3 +1199,209 @@ td {
     flex: 1;
   }
 }
+
+.page-header {
+  position: relative;
+}
+
+.upload-script-btn {
+  position: absolute;
+  right: 80px;
+  top: 20px;
+
+  padding: 13px 22px;
+
+  border: none;
+  border-radius: 10px;
+
+  background: #2f6fed;
+  color: white;
+
+  font-size: 16px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.upload-script-btn:hover {
+  background: #245ed0;
+}
+
+
+/* 모달 배경 */
+
+.upload-modal-overlay {
+  position: fixed;
+  inset: 0;
+
+  background: rgba(0, 0, 0, 0.45);
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  z-index: 1000;
+}
+
+
+/* 모달 */
+
+.upload-modal {
+  width: 520px;
+
+  background: white;
+
+  border-radius: 16px;
+
+  padding: 28px;
+
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+}
+
+
+.upload-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  margin-bottom: 25px;
+}
+
+
+.upload-modal-header h2 {
+  margin: 0;
+
+  font-size: 24px;
+  color: #172033;
+}
+
+
+.modal-close-btn {
+  border: none;
+  background: none;
+
+  font-size: 28px;
+
+  cursor: pointer;
+
+  color: #718096;
+}
+
+
+/* 입력 */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+
+  gap: 8px;
+
+  margin-bottom: 20px;
+}
+
+
+.form-group label {
+  font-size: 15px;
+  font-weight: 600;
+
+  color: #344054;
+}
+
+
+.form-group input,
+.form-group select {
+  padding: 12px 14px;
+
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+
+  font-size: 15px;
+}
+
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+
+  border-color: #2f6fed;
+}
+
+
+.file-help {
+  font-size: 13px;
+
+  color: #98a2b3;
+}
+
+
+/* 버튼 */
+
+.upload-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+
+  gap: 10px;
+
+  margin-top: 30px;
+}
+
+
+.cancel-btn {
+  padding: 11px 20px;
+
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+
+  background: white;
+
+  cursor: pointer;
+}
+
+
+.submit-upload-btn {
+  padding: 11px 22px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: #2f6fed;
+  color: white;
+
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+
+.submit-upload-btn:disabled {
+  opacity: 0.6;
+
+  cursor: not-allowed;
+}
+
+.delete-script-btn {
+  padding: 11px 18px;
+
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+
+  background: white;
+  color: #ef4444;
+
+  font-size: 15px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition: 0.2s;
+}
+
+.delete-script-btn:hover:not(:disabled) {
+  background: #ef4444;
+  color: white;
+}
+
+.delete-script-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

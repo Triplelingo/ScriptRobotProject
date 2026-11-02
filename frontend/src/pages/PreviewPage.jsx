@@ -52,16 +52,77 @@ function PreviewPage() {
       ? lines
       : lines.filter(line => line.character === filter)
 
-  // 🌟 Handles changing emotion instantly
-  const changeEmotion = (id, newEmotion) => {
+  // 🌟 감정 변경 + MySQL 자동 저장
+  const changeEmotion = async (id, newEmotion) => {
+  // 1. 현재 대사 찾기
+  const targetLine = lines.find(line => line.id === id)
+
+  if (!targetLine) {
+    alert("대사를 찾을 수 없습니다.")
+    return
+  }
+
+  // 2. 기존 감정 기억하기
+  const previousEmotion = targetLine.emotion
+
+  // 3. 실제 MySQL 대사 ID 확인
+  const dbLineId = targetLine.line_id
+
+  if (dbLineId == null) {
+    alert("DB 대사 ID가 없습니다. 대본을 다시 불러와 주세요.")
+    return
+  }
+
+  // 4. 화면에 감정 즉시 반영
+  setLines(prevLines =>
+    prevLines.map(line =>
+      line.id === id
+        ? { ...line, emotion: newEmotion }
+        : line
+    )
+  )
+
+  setEditingId(null)
+
+  try {
+    // 5. FastAPI에 감정 수정 요청
+    const response = await fetch(
+      `http://localhost:8000/api/scripts/${scriptId}/lines/${dbLineId}/emotion`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          emotion: newEmotion.toLowerCase()
+        })
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`감정 저장 실패: ${response.status}`)
+    }
+
+    // 6. 저장 성공 시 수정 횟수 증가
+    setEditedCount(prev => prev + 1)
+
+    console.log("감정 DB 저장 성공:", newEmotion)
+
+  } catch (error) {
+    console.error("감정 저장 오류:", error)
+
+    // 7. 실패하면 이전 감정으로 복원
     setLines(prevLines =>
       prevLines.map(line =>
-        line.id === id ? { ...line, emotion: newEmotion } : line
+        line.id === id
+          ? { ...line, emotion: previousEmotion }
+          : line
       )
     )
-    setEditedCount(prev => prev + 1)
-    setEditingId(null) // Close the menu
+
+    alert("감정 저장에 실패했습니다. 다시 시도해 주세요.")
   }
+}
 
   const getEmoji = (emotion) => {
     return emotions.find(e => e.name === emotion?.toLowerCase())?.emoji || '😐'

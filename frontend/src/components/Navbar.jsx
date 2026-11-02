@@ -15,6 +15,7 @@ function Navbar() {
   }
 // In Navbar.jsx (or Header component):
 const menus = [
+  { name: '가이드', path: '/guide' },
   { name: '대본 목록', path: '/upload' },
   { name: '연습 기록', path: '/history' },
   { name: '설정', path: '/settings' }

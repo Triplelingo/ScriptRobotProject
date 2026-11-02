@@ -2,6 +2,7 @@ import './App.css'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
 import Navbar from './components/Navbar'
+import GuidePage from './pages/GuidePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import UploadPage from './pages/UploadPage'
@@ -21,6 +22,7 @@ function App() {
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/preview" element={<PreviewPage />} />
         <Route path="/character" element={<CharacterPage />} />

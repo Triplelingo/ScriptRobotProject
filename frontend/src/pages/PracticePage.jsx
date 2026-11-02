@@ -35,6 +35,7 @@ function PracticePage() {
 
   const scriptId = location.state?.scriptId || 1
   const chosenRole = location.state?.chosenRole || 'Alex'
+  const isListenOnly = chosenRole === 'LISTEN_ONLY'   // CharacterPage에서 '그냥 듣기' 선택 시 전달되는 값
 
   const [scriptTitle, setScriptTitle] = useState('')
   const [scriptData, setScriptData] = useState([])
@@ -193,11 +194,12 @@ function PracticePage() {
     const currentLine = scriptData[currentLineIndex]
     if (!currentLine) return
 
-    const isRobotTurn = currentLine.character !== chosenRole
+    // 그냥 듣기 모드에서는 사용자 역할이 없으므로 모든 대사를 로봇이 재생
+    const isRobotTurn = isListenOnly ? true : currentLine.character !== chosenRole
     setCurrentRobotEmotion(currentLine.emotion || 'neutral')
 
     if (isRobotTurn) {
-      setRobotStatus('말하기 모드')
+      setRobotStatus(isListenOnly ? '대사 청취 모드' : '말하기 모드')
 
       if (lastSpokenIndexRef.current !== currentLineIndex) {
         lastSpokenIndexRef.current = currentLineIndex
@@ -211,7 +213,7 @@ function PracticePage() {
       setRobotStatus('듣기 모드')
       stopAllAudio()
     }
-  }, [currentLineIndex, scriptData, chosenRole, hasStarted])
+  }, [currentLineIndex, scriptData, chosenRole, hasStarted, isListenOnly])
 
     // 3초마다 서버·로봇 연결 상태 확인 → 끊기면 즉시 경고 표시
   useEffect(() => {
@@ -234,6 +236,7 @@ function PracticePage() {
   // 3. 사용자 음성 녹음 및 발음 평가
   // =========================================================
   const toggleRecording = async () => {
+    if (isListenOnly) return   // 듣기 모드는 마이크를 사용하지 않음
     if (isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
@@ -334,7 +337,7 @@ function PracticePage() {
 
   const handleNextLine = () => {
     const activeLine = scriptData[currentLineIndex]
-    const isMyTurn = activeLine.character === chosenRole
+    const isMyTurn = !isListenOnly && activeLine.character === chosenRole   // 듣기 모드는 항상 AI 차례
 
     if (isMyTurn && !activeLine.scores) {
       alert('현재 대사를 먼저 녹음하고 평가를 완료해주세요.')
@@ -350,12 +353,13 @@ function PracticePage() {
     stopAllAudio()
     const practicedLines = scriptData.filter((line) => line.scores !== undefined && line.scores !== null)
 
-    if (practicedLines.length === 0) {
+    if (!isListenOnly && practicedLines.length === 0) {
       alert('먼저 대사를 녹음하고 평가를 완료해주세요.')
       return
     }
 
-    navigate('/result', {
+    // 듣기 모드는 평가 기록이 없으므로 결과 페이지 대신 대본 목록으로 이동
+    navigate(isListenOnly ? '/upload' : '/result', {
       state: {
         fullSessionScript: scriptData,
         scriptId,
@@ -397,7 +401,7 @@ function PracticePage() {
 
   const isLastLine = currentLineIndex === scriptData.length - 1
   const activeLine = scriptData[currentLineIndex]
-  const isMyTurn = activeLine.character === chosenRole
+  const isMyTurn = !isListenOnly && activeLine.character === chosenRole   // 듣기 모드는 항상 AI 차례
   const progress = ((currentLineIndex + 1) / scriptData.length) * 100
 
   const completedMyLines = scriptData.filter((line) => line.character === chosenRole && line.scores).length
@@ -421,7 +425,10 @@ function PracticePage() {
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '19px', fontWeight: '800' }}>{scriptTitle}</div>
               <div style={{ marginTop: '4px', fontSize: '13px', color: '#94A3B8' }}>
-                내 역할: <strong style={{ color: '#60A5FA' }}>{chosenRole}</strong>
+                내 역할:{' '}
+                <strong style={{ color: '#60A5FA' }}>
+                  {isListenOnly ? '🎧 그냥 듣기 (청취 모드)' : chosenRole}
+                </strong>
               </div>
             </div>
 
@@ -449,12 +456,18 @@ function PracticePage() {
             <div>
               <div style={{ fontSize: '12px', color: '#94A3B8', fontWeight: '700', marginBottom: '5px' }}>현재 차례</div>
               <div style={{ fontSize: '21px', fontWeight: '800', color: isMyTurn ? '#60A5FA' : '#34D399' }}>
-                {isMyTurn ? '🎙️ 내 차례입니다' : '🤖 AI 상대역 차례입니다'}
+                {isListenOnly
+                  ? `🤖 ${activeLine.character} 대사 청취 중`
+                  : isMyTurn
+                  ? '🎙️ 내 차례입니다'
+                  : '🤖 AI 상대역 차례입니다'}
               </div>
             </div>
 
             <div style={{ padding: '9px 14px', borderRadius: '10px', background: '#0F172A', fontSize: '13px', fontWeight: '700', color: '#CBD5E1' }}>
-              {isMyTurn
+              {isListenOnly
+                ? ttsLoading ? '로봇 재생 중' : '대사 청취'
+                : isMyTurn
                 ? currentScore ? '✓ 평가 완료' : isEvaluating ? '분석 중' : isRecording ? '녹음 중' : '녹음 대기'
                 : ttsLoading ? 'TTS 재생 중' : 'AI 대사'}
             </div>
@@ -464,7 +477,7 @@ function PracticePage() {
           {currentLineIndex > 0 && (
             <div style={{ opacity: 0.45 }}>
               {scriptData.slice(Math.max(0, currentLineIndex - 2), currentLineIndex).map((line) => {
-                const isMine = line.character === chosenRole
+                const isMine = !isListenOnly && line.character === chosenRole
                 return (
                   <div key={line.id} style={{ display: 'flex', justifyContent: isMine ? 'flex-end' : 'flex-start', marginBottom: '10px' }}>
                     <div style={{ maxWidth: '65%', background: isMine ? '#312E81' : '#1E293B', borderRadius: '14px', padding: '12px 16px' }}>
@@ -532,7 +545,7 @@ function PracticePage() {
               )}
 
               {/* 평가 결과 */}
-              {currentScore && (
+              {!isListenOnly && currentScore && (
                 <div style={{ marginTop: '24px', paddingTop: '22px', borderTop: '1px solid #1E293B' }}>
                   <div style={{ fontSize: '13px', color: '#94A3B8', marginBottom: '12px', textAlign: 'center' }}>
                     현재 대사 평가 결과
@@ -556,8 +569,8 @@ function PracticePage() {
         {/* 오른쪽 상태 패널 */}
         <aside style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div style={{ background: '#0F172A', border: '1px solid #1E293B', borderRadius: '16px', padding: '26px', textAlign: 'center' }}>
-            <div style={{ width: '100px', height: '100px', margin: '0 auto 16px', borderRadius: '50%', border: `3px solid ${isRecording ? '#EF4444' : isMyTurn ? '#2563EB' : '#10B981'}`, background: '#1E293B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '42px' }}>
-              {isMyTurn ? '🎙️' : '🤖'}
+            <div style={{ width: '100px', height: '100px', margin: '0 auto 16px', borderRadius: '50%', border: `3px solid ${isListenOnly ? '#10B981' : isRecording ? '#EF4444' : isMyTurn ? '#2563EB' : '#10B981'}`, background: '#1E293B', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '42px' }}>
+              {isListenOnly ? '🎧' : isMyTurn ? '🎙️' : '🤖'}
             </div>
             <div style={{
                 fontSize: '18px',
@@ -570,7 +583,11 @@ function PracticePage() {
             </div>
             <VolumeControl /> 
             <div style={{ fontSize: '12px', color: '#64748B' }}>
-              {isMyTurn ? '버튼을 눌러 대사를 녹음하세요.' : 'AI 상대역의 대사를 듣고 다음으로 이동하세요.'}
+              {isListenOnly
+                ? '로봇의 음성을 청취하고 다음 대사로 넘어가세요.'
+                : isMyTurn
+                ? '버튼을 눌러 대사를 녹음하세요.'
+                : 'AI 상대역의 대사를 듣고 다음으로 이동하세요.'}
             </div>
           </div>
 
@@ -583,20 +600,20 @@ function PracticePage() {
                   {currentRobotEmotion}
                 </div>
                 <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>
-                  이 감정을 살려 말해보세요.
+                  {isListenOnly ? '대사의 표현 감정입니다.' : '이 감정을 살려 말해보세요.'}
                 </div>
               </div>
             </div>
           </div>
 
           <div style={{ background: '#0F172A', border: '1px solid #1E293B', borderRadius: '16px', padding: '22px' }}>
-            <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '10px' }}>내 연습 진행</div>
+            <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '10px' }}>{isListenOnly ? '청취 진행' : '내 연습 진행'}</div>
             <div style={{ fontSize: '25px', fontWeight: '800' }}>
-              {completedMyLines}
-              <span style={{ color: '#64748B', fontSize: '15px' }}> / {totalMyLines}</span>
+              {isListenOnly ? currentLineIndex + 1 : completedMyLines}
+              <span style={{ color: '#64748B', fontSize: '15px' }}> / {isListenOnly ? scriptData.length : totalMyLines}</span>
             </div>
             <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>
-              평가 완료한 내 대사
+              {isListenOnly ? '현재 청취 중인 대사 번호' : '평가 완료한 내 대사'}
             </div>
           </div>
         </aside>
@@ -622,36 +639,56 @@ function PracticePage() {
             ⏮ 이전 대사
           </button>
 
-          <button
-            onClick={toggleRecording}
-            disabled={!isMyTurn || isEvaluating || ttsLoading}
-            style={{
-              padding: '14px 48px',
-              background: isEvaluating ? '#94A3B8' : isRecording ? '#DC2626' : '#EF4444',
-              color: '#FFFFFF',
-              border: 'none',
-              borderRadius: '24px',
-              fontSize: '18px',
-              fontWeight: 'bold',
-              cursor: isMyTurn && !isEvaluating && !ttsLoading ? 'pointer' : 'not-allowed',
-              opacity: !isMyTurn || isEvaluating || ttsLoading ? 0.4 : 1,
-            }}
-          >
-            {isEvaluating ? '⏳ 평가 중...' : isRecording ? '🛑 녹음 중지' : '🎙️ 녹음 시작'}
-          </button>
+          {/* 듣기 모드: 녹음 버튼 대신 안내 배너 */}
+          {isListenOnly ? (
+            <div
+              style={{
+                padding: '14px 36px',
+                background: '#1E293B',
+                border: '1px solid #334155',
+                borderRadius: '24px',
+                color: '#93C5FD',
+                fontSize: '15px',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              🎧 그냥 듣기 모드 (마이크 사용 안 함)
+            </div>
+          ) : (
+            <button
+              onClick={toggleRecording}
+              disabled={!isMyTurn || isEvaluating || ttsLoading}
+              style={{
+                padding: '14px 48px',
+                background: isEvaluating ? '#94A3B8' : isRecording ? '#DC2626' : '#EF4444',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '24px',
+                fontSize: '18px',
+                fontWeight: 'bold',
+                cursor: isMyTurn && !isEvaluating && !ttsLoading ? 'pointer' : 'not-allowed',
+                opacity: !isMyTurn || isEvaluating || ttsLoading ? 0.4 : 1,
+              }}
+            >
+              {isEvaluating ? '⏳ 평가 중...' : isRecording ? '🛑 녹음 중지' : '🎙️ 녹음 시작'}
+            </button>
+          )}
 
           {isLastLine ? (
             <button
               onClick={handleFinishPractice}
-              disabled={isMyTurn && !currentScore}
+              disabled={!isListenOnly && isMyTurn && !currentScore}
               style={{
                 padding: '13px 24px',
                 border: 'none',
                 borderRadius: '10px',
-                background: isMyTurn && !currentScore ? '#334155' : '#10B981',
+                background: (!isListenOnly && isMyTurn && !currentScore) ? '#334155' : '#10B981',
                 color: '#FFFFFF',
                 fontWeight: '800',
-                cursor: isMyTurn && !currentScore ? 'not-allowed' : 'pointer',
+                cursor: (!isListenOnly && isMyTurn && !currentScore) ? 'not-allowed' : 'pointer',
               }}
             >
               연습 완료 🏁
@@ -702,12 +739,26 @@ function PracticePage() {
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
             }}
           >
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎭</div>
-            <h2 style={{ fontSize: '22px', fontWeight: '800', marginBottom: '10px' }}>연습 준비 완료!</h2>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>
+              {isListenOnly ? '🎧' : '🎭'}
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: '800', marginBottom: '10px' }}>
+              {isListenOnly ? '대사 청취 준비 완료!' : '연습 준비 완료!'}
+            </h2>
             <p style={{ fontSize: '14px', color: '#94A3B8', marginBottom: '28px', lineHeight: '1.6' }}>
-              '{chosenRole}' 역할로 대화 연습을 시작합니다.
-              <br />
-              시작 버튼을 누르면 상대역의 대사가 재생됩니다.
+              {isListenOnly ? (
+                <>
+                  '그냥 듣기' 모드로 연속 청취를 시작합니다.
+                  <br />
+                  시작 버튼을 누르면 첫 번째 대사부터 로봇이 재생합니다.
+                </>
+              ) : (
+                <>
+                  '{chosenRole}' 역할로 대화 연습을 시작합니다.
+                  <br />
+                  시작 버튼을 누르면 상대역의 대사가 재생됩니다.
+                </>
+              )}
             </p>
 
             <button
@@ -730,7 +781,7 @@ function PracticePage() {
                 transition: 'background 0.2s ease',
               }}
             >
-              연습 시작하기 ▶
+              {isListenOnly ? '청취 시작하기 ▶' : '연습 시작하기 ▶'}
             </button>
           </div>
         </div>

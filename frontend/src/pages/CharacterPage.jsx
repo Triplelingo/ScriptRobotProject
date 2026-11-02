@@ -95,6 +95,15 @@ function CharacterPage() {
   // 인물별 통계 및 감정 데이터 파싱 헬퍼 함수
   // =========================================================
   const processLines = (lines) => {
+    if (!lines || lines.length === 0) {
+      setCharacterList([])
+      setTotalLines(0)
+      setSelected('')
+      setError('대본에서 등장인물을 찾을 수 없습니다.')
+      setLoading(false)
+      return
+    }
+
     setTotalLines(lines.length)
 
     // 등장인물 중복 제거
@@ -102,9 +111,18 @@ function CharacterPage() {
       new Set(
         lines.map(
           (line) => line.character
-        )
+        ).filter(Boolean)
       )
     )
+
+    if (distinctNames.length === 0) {
+      setCharacterList([])
+      setTotalLines(0)
+      setSelected('')
+      setError('대본에서 등장인물을 찾을 수 없습니다.')
+      setLoading(false)
+      return
+    }
 
     // 인물별 정보 및 감정 목록 생성
     const dynamicCharacters = distinctNames.map((name, index) => {
@@ -126,7 +144,7 @@ function CharacterPage() {
     })
 
     setCharacterList(dynamicCharacters)
-    setSelected('')
+    setSelected(dynamicCharacters[0]?.name || '')
     setLoading(false)
   }
 
@@ -160,7 +178,7 @@ function CharacterPage() {
         const data = await response.json()
         const lines = data.lines || []
 
-        setScriptTitle(data.title)
+        if (data.title) setScriptTitle(data.title)
         processLines(lines)
       } catch (err) {
         console.error('Failed to load character list:', err)
@@ -174,13 +192,15 @@ function CharacterPage() {
   }, [scriptId, location.state])
 
   // =========================================================
-  // 선택된 캐릭터
+  // 선택된 캐릭터 & 모드
   // =========================================================
   const selectedCharacter =
     characterList.find(
       (character) =>
         character.name === selected
     )
+
+  const isListenOnly = selected === 'LISTEN_ONLY'
 
   // =========================================================
   // 연습 시작
@@ -195,7 +215,7 @@ function CharacterPage() {
       state: {
         scriptId: scriptId,
         scriptTitle: scriptTitle,
-        chosenRole: selected,
+        chosenRole: selected, // 'LISTEN_ONLY' 또는 선택된 캐릭터 이름 전달
         customLines: location.state?.customLines // 수정된 감정 데이터를 PracticePage로 계속 전달
       }
     })
@@ -370,15 +390,17 @@ function CharacterPage() {
             🎭
           </div>
 
-          <h2 style={{ 
-          fontSize: '28px', 
-          fontWeight: '800', 
-          color: '#0F172A',  // 🌟 Explicit dark text color
-          marginBottom: '8px', 
-          textAlign: 'center' 
-        }}>
-          등장인물 배정
-        </h2>
+          <h2
+            style={{
+              fontSize: '28px',
+              fontWeight: '800',
+              color: '#0F172A',
+              marginBottom: '8px',
+              textAlign: 'center'
+            }}
+          >
+            등장인물 배정
+          </h2>
 
           <p
             style={{
@@ -387,7 +409,7 @@ function CharacterPage() {
               margin: 0
             }}
           >
-            내가 연기할 역할을 선택하세요.
+            내가 연기할 역할을 선택하거나, 대사 듣기만 진행할 수 있습니다.
             <br />
             선택하지 않은 인물은 AI가 자동으로 연기합니다.
           </p>
@@ -447,7 +469,7 @@ function CharacterPage() {
         </div>
 
         {/* =====================================================
-            캐릭터 선택
+            캐릭터 선택 목록
         ===================================================== */}
         <div
           style={{
@@ -516,8 +538,8 @@ function CharacterPage() {
                   >
                     <h2
                       style={{
-                        fontSize: '20px', 
-                        fontWeight: '800', 
+                        fontSize: '20px',
+                        fontWeight: '800',
                         color: '#0F172A',
                         margin: 0
                       }}
@@ -613,12 +635,156 @@ function CharacterPage() {
               </div>
             )
           })}
+
+          {/* =====================================================
+              그냥 듣기 (말하기 기능 없음) 카드
+          ===================================================== */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setSelected('LISTEN_ONLY')}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                setSelected('LISTEN_ONLY')
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '22px',
+              background: '#FFFFFF',
+              border: isListenOnly
+                ? '2px solid #2563EB'
+                : '1px solid #E2E8F0',
+              borderRadius: '18px',
+              padding: '22px 26px',
+              cursor: 'pointer',
+              boxShadow: isListenOnly
+                ? '0 0 0 4px rgba(37, 99, 235, 0.08)'
+                : '0 2px 4px rgba(15, 23, 42, 0.02)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            {/* Avatar */}
+            <div
+              style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                background: isListenOnly ? '#2563EB' : '#F1F5F9',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '27px',
+                flexShrink: 0
+              }}
+            >
+              🎧
+            </div>
+
+            {/* 인물 정보 */}
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '6px'
+                }}
+              >
+                <h2
+                  style={{
+                    fontSize: '20px',
+                    fontWeight: '800',
+                    color: '#0F172A',
+                    margin: 0
+                  }}
+                >
+                  그냥 듣기 (말하기 기능 없음)
+                </h2>
+
+                {isListenOnly && (
+                  <span
+                    style={{
+                      padding: '3px 9px',
+                      borderRadius: '20px',
+                      background: '#DBEAFE',
+                      color: '#2563EB',
+                      fontSize: '11px',
+                      fontWeight: '800'
+                    }}
+                  >
+                    선택됨
+                  </span>
+                )}
+              </div>
+
+              <div
+                style={{
+                  fontSize: '13px',
+                  color: '#64748B'
+                }}
+              >
+                녹음이나 발화 평가 없이, AI의 자연스러운 대화 음성을 연속해서 청취합니다.
+              </div>
+            </div>
+
+            {/* 배지 */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '6px',
+                flexWrap: 'wrap',
+                justifyContent: 'flex-end',
+                maxWidth: '310px'
+              }}
+            >
+              <span
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  background: '#F1F5F9',
+                  color: '#475569',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <span>🎙️</span>
+                <span>마이크 미사용</span>
+              </span>
+            </div>
+
+            {/* 선택 표시 */}
+            <div
+              style={{
+                width: '26px',
+                height: '26px',
+                borderRadius: '50%',
+                border: isListenOnly
+                  ? '2px solid #2563EB'
+                  : '2px solid #CBD5E1',
+                background: isListenOnly ? '#2563EB' : '#FFFFFF',
+                color: '#FFFFFF',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                fontSize: '14px',
+                fontWeight: '800',
+                flexShrink: 0
+              }}
+            >
+              {isListenOnly ? '✓' : ''}
+            </div>
+          </div>
         </div>
 
         {/* =====================================================
             선택 완료 영역
         ===================================================== */}
-        {selectedCharacter && (
+        {selected && (
           <div
             style={{
               marginTop: '28px',
@@ -635,7 +801,7 @@ function CharacterPage() {
                 color: '#1E40AF'
               }}
             >
-              선택한 역할
+              선택한 모드
             </div>
 
             <div
@@ -646,7 +812,7 @@ function CharacterPage() {
                 marginTop: '4px'
               }}
             >
-              {selectedCharacter.name}
+              {isListenOnly ? '🎧 그냥 듣기 (말하기 기능 없음)' : selectedCharacter?.name}
             </div>
 
             <div
@@ -656,7 +822,9 @@ function CharacterPage() {
                 marginTop: '5px'
               }}
             >
-              {selectedCharacter.linesCount}개의 대사를 직접 연습합니다.
+              {isListenOnly
+                ? '모든 대사를 AI 음성으로 연속해서 감상합니다.'
+                : `${selectedCharacter?.linesCount}개의 대사를 직접 연습합니다.`}
             </div>
           </div>
         )}
@@ -686,7 +854,9 @@ function CharacterPage() {
           }}
         >
           {selected
-            ? `${selected} 역할로 연습 시작`
+            ? isListenOnly
+              ? '🎧 그냥 듣기 모드로 시작'
+              : `${selected} 역할로 연습 시작`
             : '연습할 역할을 선택하세요'}
         </button>
       </section>
